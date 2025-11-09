@@ -332,21 +332,26 @@ window.addEventListener('load', () => {
       }catch(e){ log('Abbrev file error: ' + e); }
     }
 
-    // Word-boundary-safe replacement + acronym casing
-    function replaceAbbreviationsBrowser(text){
-      if (!applyAbbrev.checked || ABBREV.size === 0) return { text, count: 0 };
-      const pairs = Array.from(ABBREV.entries()).sort((a,b)=> b[0].length - a[0].length);
-      let count = 0; let out = text;
-      for (const [phrase, replRaw] of pairs){
-        const escaped = phrase.replace(/[.*+?^${}()|[\]\]/g,'\$&');
-        const re = new RegExp(`(?<!\w)${escaped}(?!\w)`, 'gi');
-        const replacer = (m)=>{ count++; const repl = String(replRaw);
-          if (/^[a-z]{2,5}$/.test(repl)) return repl.toUpperCase();
-          return repl; };
-        out = out.replace(re, replacer);
-      }
-      return { text: out, count };
-    }
+<script>
+// (keep preceding code)
+function replaceAbbreviationsBrowser(text){
+  if (!applyAbbrev.checked || ABBREV.size === 0) return { text, count: 0 };
+  const pairs = Array.from(ABBREV.entries()).sort((a,b)=> b[0].length - a[0].length);
+  let count = 0; let out = text;
+  for (const [phrase, replRaw] of pairs){
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    // Safari-safe boundaries: left via capture, right via lookahead
+    const re = new RegExp('(^|[^A-Za-z0-9_])(' + escaped + ')(?=[^A-Za-z0-9_]|$)', 'gi');
+    out = out.replace(re, (match, pre) => {
+      count++;
+      const raw = String(replRaw);
+      const repl = (/^[a-z]{2,5}$/i.test(raw) && /^[a-z]{2,5}$/.test(raw)) ? raw.toUpperCase() : raw;
+      return pre + repl;
+    });
+  }
+  return { text: out, count };
+}
+</script>
 
     // EDU NLP using compromise: pronouns, verb lemmas, key nouns
     const EDU_STOPWORDS = new Set(['a','an','the','and','or','but','if','then','than','of','to','in','on','at','for','from','with','as','by','is','are','am','be','been','was','were','do','does','did','that','this','those','these','it','my','your','our']);
