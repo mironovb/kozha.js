@@ -228,38 +228,45 @@
   </div>
 
   <script>
-    // ------------------------------
-    // CWASA init
-    // ------------------------------
-    const renderStatus = document.getElementById('renderStatus');
 
-    function initCWASA() {
-      if (!window.CWASA) {
-        renderStatus.textContent = 'CWASA script not loaded. Check network.';
-        return;
-      }
-      CWASA.init({
-        useClientConfig: false,
-        useCwaConfig: true,
-        avSettings: [{
-          width: 448,
-          height: 360,
-          avList: 'avs',
-          initAv: 'anna',
-          ambIdle: true,
-          allowFrameSteps: false,
-          allowSiGMLText: false,
-        }]
-      });
+// ------------------------------
+// CWASA init
+// ------------------------------
+const renderStatus = document.getElementById('renderStatus');
 
-      if (CWASA.ready && typeof CWASA.ready.then === 'function') {
-        CWASA.ready.then(() => renderStatus.textContent = 'Ready.');
-      } else {
-        setTimeout(() => renderStatus.textContent = 'Ready.', 400);
-      }
+function initCWASA() {
+  if (!window.CWASA) {
+    renderStatus.textContent = 'CWASA script not loaded. Check URLs.';
+    return;
+  }
+  CWASA.init({
+    useClientConfig: false,
+    useCwaConfig: true,
+    avSettings: [{
+      width: 384,
+      height: 320,
+      avList: 'avs',
+      initAv: 'anna',
+      ambIdle: true,
+      allowFrameSteps: false,
+      allowSiGMLText: false,
+    }]
+  });
+  if (CWASA.ready && typeof CWASA.ready.then === 'function') {
+    CWASA.ready.then(() => { renderStatus.textContent = 'Ready.'; });
+  } else {
+    setTimeout(() => { renderStatus.textContent = 'Ready.'; }, 300);
+  }
+}
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    try { initCWASA(); } catch (e) {
+      console.error(e);
+      renderStatus.textContent = 'CWASA init error — see console.';
     }
-
-    window.addEventListener('load', () => setTimeout(initCWASA, 150));
+  }, 150);
+});
+</script>
   <script>
     // ------------------------------
     // Abbreviations loading + EDU NLP helpers
