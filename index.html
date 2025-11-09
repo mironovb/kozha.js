@@ -166,6 +166,16 @@
           </div>
           <div class="hint" style="margin-top:6px">You can load multiple files one-by-one. Loaded signs override earlier duplicates by gloss.</div>
         </div>
+        <div class="row" style="margin-top:8px">
+  <label class="grow">Concept CSV (optional)</label>
+  <input id="conceptUrlInput" type="text" placeholder="database/hamnosys_bsl.csv" />
+  <button id="loadConceptBtn">Load</button>
+</div>
+<div class="row">
+  <label class="grow">Or upload CSV/TSV</label>
+  <input id="conceptFile" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" />
+</div>
+
       </section>
 
       <!-- RIGHT: Outputs + CWASA -->
@@ -388,8 +398,54 @@ window.addEventListener('load', () => {
     const allowedOut = document.getElementById('allowedOut');
     const dbUrlInput = document.getElementById('dbUrlInput');
     const loadDbBtn = document.getElementById('loadDbBtn');
+    const conceptUrlInput = document.getElementById('conceptUrlInput');
+    const loadConceptBtn  = document.getElementById('loadConceptBtn');
+    const conceptFile     = document.getElementById('conceptFile');
 
     const glossToSign = new Map(); // gloss -> <hns_sign>...</hns_sign>
+
+// Canonical indices
+const baseToGloss   = new Map();  // "abroad" -> "abroad(a)#1"
+const conceptToGloss= new Map();  // from CSV: "cell phone" -> "cellular_telephone(n)#1"
+
+function glossBase(gloss){
+  return String(gloss).toLowerCase()
+    .replace(/\(.*?\)/g, '')   // (a)/(v)/etc
+    .replace(/#\d+$/g, '')     // #1
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+function rebuildBaseIndex(){
+  baseToGloss.clear();
+  for (const g of glossToSign.keys()){
+    const b = glossBase(g);
+    if (!baseToGloss.has(b)) baseToGloss.set(b, g);
+  }
+}
+
+    // Canonical indices
+const baseToGloss = new Map();   // "abroad" -> "abroad(a)#1" (preferred)
+const conceptToGloss = new Map(); // optional CSV lexicon: "abroad" -> "abroad(a)#1"
+
+// Normalize a gloss like "abroad(a)#1" -> "abroad"
+function glossBase(gloss) {
+  return String(gloss)
+    .toLowerCase()
+    .replace(/\(.*?\)/g, '')    // remove (a)/(v)/etc
+    .replace(/#\d+$/g, '')      // remove #1
+    .replace(/[^a-z0-9]+/g, ' ')// keep letters/numbers, collapse others
+    .trim();
+}
+
+function rebuildBaseIndex() {
+  baseToGloss.clear();
+  for (const g of glossToSign.keys()) {
+    const b = glossBase(g);
+    // prefer first seen; later loads can override
+    if (!baseToGloss.has(b)) baseToGloss.set(b, g);
+  }
+}
+
 
     async function loadSigmlUrl(url){
       try{
@@ -415,7 +471,69 @@ window.addEventListener('load', () => {
     function refreshAllowedOutput(){
       const list = Array.from(glossToSign.keys()).sort();
       allowedOut.textContent = list.join(', ');
+      rebuildBaseIndex();
     }
+    function parseTable(text){
+  const delim = text.includes('\t') ? '\t' : ',';
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  const header = (lines.shift() || '').split(delim).map(s=>s.trim().toLowerCase());
+  const rows = lines.map(line => {
+    const cols = line.split(delim).map(s=>s.trim());
+    const obj = {};
+    for (let i=0;i<header.length;i++) obj[header[i]] = cols[i] || '';
+    return obj;
+  });
+  return { header, rows };
+}
+
+async function loadConceptCsvUrl(url){
+  try{
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const txt = await res.text();
+    const { header, rows } = parseTable(txt);
+    if (!header.includes('concept') || !header.includes('gloss'))
+      throw new Error('CSV must have "concept" and "gloss" headers');
+    let n = 0;
+    for (const r of rows){
+      const concept = String(r.concept||'').toLowerCase().trim();
+      const gloss   = String(r.gloss||'').toLowerCase().trim();
+      if (!concept || !gloss) continue;
+      conceptToGloss.set(glossBase(concept), gloss);
+      n++;
+    }
+    log(`Loaded ${n} concept→gloss entries from ${url}`);
+  }catch(e){ log('Concept CSV load error: ' + e); }
+}
+
+async function loadConceptCsvFile(file){
+  try{
+    const txt = await file.text();
+    const { header, rows } = parseTable(txt);
+    if (!header.includes('concept') || !header.includes('gloss'))
+      throw new Error('CSV must have "concept" and "gloss" headers');
+    let n = 0;
+    for (const r of rows){
+      const concept = String(r.concept||'').toLowerCase().trim();
+      const gloss   = String(r.gloss||'').toLowerCase().trim();
+      if (!concept || !gloss) continue;
+      conceptToGloss.set(glossBase(concept), gloss);
+      n++;
+    }
+    log(`Loaded ${n} concept→gloss entries from file: ${file.name}`);
+  }catch(e){ log('Concept CSV file error: ' + e); }
+}
+
+// Wire up buttons/inputs (IDs were added in step 1)
+loadConceptBtn?.addEventListener('click', ()=>{
+  const u = conceptUrlInput?.value.trim();
+  if (u) loadConceptCsvUrl(u);
+});
+conceptFile?.addEventListener('change', (e)=>{
+  const f = e.target.files?.[0];
+  if (f) loadConceptCsvFile(f);
+});
+
 
     loadDbBtn.addEventListener('click', () => {
       const u = dbUrlInput.value.trim();
@@ -482,25 +600,60 @@ window.addEventListener('load', () => {
       return 1 - d / Math.max(a.length, b.length);
     }
 
-    function mapToAvailable(tokens, allowed, cutoff = 0.85){
-      const mapped = [], subs = {}, missing = [];
-      if (allowed.length === 0) return { mapped, subs, missing: [...tokens] };
-      for (const t of tokens){
-        if (allowed.includes(t)) { mapped.push(t); continue; }
-        let best=null, bestScore=0;
-        for (const a of allowed){
-          const s = similarity(t, a);
-          if (s > bestScore) { bestScore = s; best = a; }
-        }
-        if (best && bestScore >= cutoff){
-          mapped.push(best);
-          subs[t] = best;
-        } else {
-          missing.push(t);
-        }
-      }
-      return { mapped, subs, missing };
+   function mapToAvailable(tokens, allowedGlosses, cutoff = 0.82){
+  const mapped = [], subs = {}, missing = [];
+  if (!allowedGlosses.length) return { mapped, subs, missing: [...tokens] };
+
+  // Build once per call
+  const bases = allowedGlosses.map(g => glossBase(g));
+  const baseToGlossLocal = new Map();
+  for (let i=0; i<allowedGlosses.length; i++){
+    const g = allowedGlosses[i];
+    const b = bases[i];
+    if (!baseToGlossLocal.has(b)) baseToGlossLocal.set(b, g);
+  }
+
+  for (const t of tokens){
+    // 1) exact gloss
+    if (allowedGlosses.includes(t)) { mapped.push(t); continue; }
+
+    // 2) exact base (e.g., "abroad" -> "abroad(a)#1")
+    const tBase = glossBase(t); // safe for plain words too
+    if (baseToGloss.has(tBase)) {
+      mapped.push(baseToGloss.get(tBase));
+      if (t !== tBase) subs[t] = baseToGloss.get(tBase);
+      continue;
     }
+    if (baseToGlossLocal.has(tBase)) {
+      mapped.push(baseToGlossLocal.get(tBase));
+      if (t !== tBase) subs[t] = baseToGlossLocal.get(tBase);
+      continue;
+    }
+
+    // 3) concept lexicon (optional CSV)
+    if (conceptToGloss.has(tBase)) {
+      mapped.push(conceptToGloss.get(tBase));
+      subs[t] = conceptToGloss.get(tBase);
+      continue;
+    }
+
+    // 4) fuzzy on BASES, then recover the gloss
+    let bestBase = null, bestScore = 0;
+    for (const b of baseToGlossLocal.keys()){
+      const s = similarity(tBase, b);
+      if (s > bestScore) { bestScore = s; bestBase = b; }
+    }
+    if (bestBase && bestScore >= cutoff){
+      const g = baseToGlossLocal.get(bestBase);
+      mapped.push(g);
+      subs[t] = g;
+    } else {
+      missing.push(t);
+    }
+  }
+  return { mapped, subs, missing };
+}
+
 
     function currentAllowed(){
       return Array.from(glossToSign.keys()).sort();
@@ -567,7 +720,7 @@ window.addEventListener('load', () => {
       // EDU NLP pipeline (optional)
       if (typeof eduNlpToggle !== 'undefined' && eduNlpToggle.checked){
         const eduTokens = processEducationalText(raw);
-        const m = mapToAvailable(eduTokens, allowed, 0.85);
+        const m = mapToAvailable(eduTokens, allowed, 0.82);
         mapped = m.mapped; subs = m.subs; missing = m.missing;
         normalizedOut.value = eduTokens.join(' ');
         const lines = [];
@@ -591,7 +744,7 @@ window.addEventListener('load', () => {
       if (!mapped){
         const norm = normalizeText(raw);
         const heur = heuristicPlan(norm);
-        const m = mapToAvailable(heur, allowed, 0.85);
+        const m = mapToAvailable(heur, allowed, 0.82);
         mapped = m.mapped; subs = m.subs; missing = m.missing;
         normalizedOut.value = norm.join(' ');
         const lines = [];
