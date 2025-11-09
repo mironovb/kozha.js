@@ -351,7 +351,7 @@ window.addEventListener('load', () => {
         const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         // Safari-safe boundaries: left via capture, right via lookahead
         const re = new RegExp('(^|[^A-Za-z0-9_])(' + escaped + ')(?=[^A-Za-z0-9_]|$)', 'gi');
-        out = out.replace(re, (match, pre) => {
+        out = out.replace(re, (match, pre, matched) => {
           count++;
           const raw = String(replRaw);
           const repl = (/^[a-z]{2,5}$/i.test(raw) && /^[a-z]{2,5}$/.test(raw)) ? raw.toUpperCase() : raw;
@@ -366,7 +366,7 @@ window.addEventListener('load', () => {
 
     function timeframeGuess(str){
       const s = (str || '').toLowerCase();
-      if (/\bwill\b|tomorrow|\bnext\b/.test(s)) return 'In the future';
+      if (/\bwill\b|\btomorrow\b|\bnext\b/.test(s)) return 'In the future';
       if (/\byesterday\b|\bago\b|\blast\b/.test(s)) return 'In the past';
       return 'Now';
     }
@@ -404,53 +404,40 @@ window.addEventListener('load', () => {
 
     const glossToSign = new Map(); // gloss -> <hns_sign>...</hns_sign>
 
-// Canonical indices
-const baseToGloss   = new Map();  // "abroad" -> "abroad(a)#1"
-const conceptToGloss= new Map();  // from CSV: "cell phone" -> "cellular_telephone(n)#1"
-
-function glossBase(gloss){
-  return String(gloss).toLowerCase()
-    .replace(/\(.*?\)/g, '')   // (a)/(v)/etc
-    .replace(/#\d+$/g, '')     // #1
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-function rebuildBaseIndex(){
-  baseToGloss.clear();
-  for (const g of glossToSign.keys()){
-    const b = glossBase(g);
-    if (!baseToGloss.has(b)) baseToGloss.set(b, g);
-  }
-}
-
     // Canonical indices
-const baseToGloss = new Map();   // "abroad" -> "abroad(a)#1" (preferred)
-const conceptToGloss = new Map(); // optional CSV lexicon: "abroad" -> "abroad(a)#1"
+    const baseToGloss = new Map();   // "abroad" -> "abroad(a)#1" (preferred)
+    const conceptToGloss = new Map(); // optional CSV lexicon: "cell phone" -> "cellular_telephone(n)#1"
 
-// Normalize a gloss like "abroad(a)#1" -> "abroad"
-function glossBase(gloss) {
-  return String(gloss)
-    .toLowerCase()
-    .replace(/\(.*?\)/g, '')    // remove (a)/(v)/etc
-    .replace(/#\d+$/g, '')      // remove #1
-    .replace(/[^a-z0-9]+/g, ' ')// keep letters/numbers, collapse others
-    .trim();
-}
+    // Normalize a gloss like "abroad(a)#1" -> "abroad"
+    function glossBase(gloss) {
+      return String(gloss)
+        .toLowerCase()
+        .replace(/\(.*?\)/g, '')    // remove (a)/(v)/etc
+        .replace(/#\d+$/g, '')      // remove #1
+        .replace(/[^a-z0-9]+/g, ' ')// keep letters/numbers, collapse others
+        .trim();
+    }
 
-function rebuildBaseIndex() {
-  baseToGloss.clear();
-  for (const g of glossToSign.keys()) {
-    const b = glossBase(g);
-    // prefer first seen; later loads can override
-    if (!baseToGloss.has(b)) baseToGloss.set(b, g);
-  }
-}
+    function rebuildBaseIndex() {
+      baseToGloss.clear();
+      for (const g of glossToSign.keys()) {
+        const b = glossBase(g);
+        // prefer first seen; later loads can override
+        if (!baseToGloss.has(b)) baseToGloss.set(b, g);
+      }
+    }
 
 
-    async function loadSigmlUrl(url){
+    async function loadSigmlUrl(url, isAutoload = false){
       try{
         const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
+        if (!res.ok) {
+          if (isAutoload && res.status === 404) {
+            log(`Optional DB missing: ${url} (skipping)`);
+            return;
+          }
+          throw new Error('HTTP ' + res.status);
+        }
         const xmlText = await res.text();
         const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
         const signs = Array.from(doc.querySelectorAll('hns_sign'));
@@ -464,7 +451,11 @@ function rebuildBaseIndex() {
         refreshAllowedOutput();
         log(`Loaded ${added} signs from ${url}`);
       }catch(e){
-        log(`Failed to load ${url}: ${e}. If this is a CORS error, host the file under /database on the same origin or enable CORS on the source.`);
+        if (isAutoload) {
+          log(`Optional DB missing: ${url} (skipping)`);
+        } else {
+          log(`Failed to load ${url}: ${e}. If this is a CORS error, host the file under /database on the same origin or enable CORS on the source.`);
+        }
       }
     }
 
@@ -474,22 +465,34 @@ function rebuildBaseIndex() {
       rebuildBaseIndex();
     }
     function parseTable(text){
-  const delim = text.includes('\t') ? '\t' : ',';
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  const header = (lines.shift() || '').split(delim).map(s=>s.trim().toLowerCase());
-  const rows = lines.map(line => {
-    const cols = line.split(delim).map(s=>s.trim());
-    const obj = {};
-    for (let i=0;i<header.length;i++) obj[header[i]] = cols[i] || '';
-    return obj;
-  });
-  return { header, rows };
-}
+      // Support BOM
+      let cleaned = text;
+      if (text.charCodeAt(0) === 0xFEFF) {
+        cleaned = text.slice(1);
+      }
+      const delim = cleaned.includes('\t') ? '\t' : ',';
+      const lines = cleaned.split(/\r?\n/).filter(line => line.trim());
+      if (!lines.length) return { header: [], rows: [] };
+      const header = (lines.shift() || '').split(delim).map(s=>s.trim().toLowerCase());
+      const rows = lines.map(line => {
+        const cols = line.split(delim).map(s=>s.trim());
+        const obj = {};
+        for (let i=0;i<header.length;i++) obj[header[i]] = cols[i] || '';
+        return obj;
+      });
+      return { header, rows };
+    }
 
-async function loadConceptCsvUrl(url){
+async function loadConceptCsvUrl(url, isAutoload = false){
   try{
     const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!res.ok) {
+      if (isAutoload && res.status === 404) {
+        log(`Optional DB missing: ${url} (skipping)`);
+        return;
+      }
+      throw new Error('HTTP ' + res.status);
+    }
     const txt = await res.text();
     const { header, rows } = parseTable(txt);
     if (!header.includes('concept') || !header.includes('gloss'))
@@ -502,8 +505,14 @@ async function loadConceptCsvUrl(url){
       conceptToGloss.set(glossBase(concept), gloss);
       n++;
     }
-    log(`Loaded ${n} concept→gloss entries from ${url}`);
-  }catch(e){ log('Concept CSV load error: ' + e); }
+    log(`Loaded ${n} concepts from ${url}`);
+  }catch(e){ 
+    if (isAutoload) {
+      log(`Optional DB missing: ${url} (skipping)`);
+    } else {
+      log('Concept CSV load error: ' + e);
+    }
+  }
 }
 
 async function loadConceptCsvFile(file){
@@ -540,8 +549,11 @@ conceptFile?.addEventListener('change', (e)=>{
       if (u) loadSigmlUrl(u);
     });
 
-    // Auto-load default DB path
-    if (dbUrlInput){ dbUrlInput.value = 'database/hamnosys_bsl_version1.sigml'; loadSigmlUrl(dbUrlInput.value); }
+    // Auto-load default DB paths on page load
+    window.addEventListener('load', async () => {
+      await loadSigmlUrl('database/hamnosys_bsl_version1.sigml', true);
+      await loadConceptCsvUrl('database/hamnosys_bsl.csv', true);
+    });
   </script>
 
   <script>
@@ -604,7 +616,7 @@ conceptFile?.addEventListener('change', (e)=>{
   const mapped = [], subs = {}, missing = [];
   if (!allowedGlosses.length) return { mapped, subs, missing: [...tokens] };
 
-  // Build once per call
+  // Build local base index once per call
   const bases = allowedGlosses.map(g => glossBase(g));
   const baseToGlossLocal = new Map();
   for (let i=0; i<allowedGlosses.length; i++){
@@ -614,30 +626,38 @@ conceptFile?.addEventListener('change', (e)=>{
   }
 
   for (const t of tokens){
-    // 1) exact gloss
-    if (allowedGlosses.includes(t)) { mapped.push(t); continue; }
-
-    // 2) exact base (e.g., "abroad" -> "abroad(a)#1")
-    const tBase = glossBase(t); // safe for plain words too
-    if (baseToGloss.has(tBase)) {
-      mapped.push(baseToGloss.get(tBase));
-      if (t !== tBase) subs[t] = baseToGloss.get(tBase);
-      continue;
-    }
-    if (baseToGlossLocal.has(tBase)) {
-      mapped.push(baseToGlossLocal.get(tBase));
-      if (t !== tBase) subs[t] = baseToGlossLocal.get(tBase);
-      continue;
+    // 1) exact gloss match
+    if (allowedGlosses.includes(t)) { 
+      mapped.push(t); 
+      continue; 
     }
 
-    // 3) concept lexicon (optional CSV)
+    // 2) concept lexicon (CSV) - check first for plain words
+    const tBase = glossBase(t);
     if (conceptToGloss.has(tBase)) {
-      mapped.push(conceptToGloss.get(tBase));
-      subs[t] = conceptToGloss.get(tBase);
+      const g = conceptToGloss.get(tBase);
+      mapped.push(g);
+      if (t !== g) subs[t] = g;
       continue;
     }
 
-    // 4) fuzzy on BASES, then recover the gloss
+    // 3) base index from loaded glosses (global)
+    if (baseToGloss.has(tBase)) {
+      const g = baseToGloss.get(tBase);
+      mapped.push(g);
+      if (t !== g) subs[t] = g;
+      continue;
+    }
+
+    // 4) local base index (fallback)
+    if (baseToGlossLocal.has(tBase)) {
+      const g = baseToGlossLocal.get(tBase);
+      mapped.push(g);
+      if (t !== tBase) subs[t] = g;
+      continue;
+    }
+
+    // 5) fuzzy match on bases
     let bestBase = null, bestScore = 0;
     for (const b of baseToGlossLocal.keys()){
       const s = similarity(tBase, b);
@@ -714,6 +734,19 @@ conceptFile?.addEventListener('change', (e)=>{
         tokensOut.value = rawTokens.join(' ');
         chipify(rawTokens);
         window.__plannedTokens = rawTokens;
+        return;
+      }
+
+      // Check if entire phrase matches a concept (before tokenizing)
+      const phraseBase = glossBase(raw);
+      if (conceptToGloss.has(phraseBase)) {
+        const g = conceptToGloss.get(phraseBase);
+        mapped = [g];
+        normalizedOut.value = raw;
+        planLog.textContent = `concept-map: "${raw}" → "${g}"`;
+        tokensOut.value = g;
+        chipify(mapped);
+        window.__plannedTokens = mapped;
         return;
       }
 
