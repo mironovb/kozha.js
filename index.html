@@ -563,8 +563,7 @@ function timeframeGuess(str){
         lines.push('edu-nlp');
         if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
         if (missing.length) lines.push('missing: ' + missing.join(', '));
-        planLog.textContent = lines.join('
-');
+        planLog.textContent = lines.join('\n');
       }
 
       // OpenAI planner (optional)
@@ -588,14 +587,15 @@ function timeframeGuess(str){
         if (heur.length) lines.push('heuristic: ' + heur.join(' '));
         if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
         if (missing.length) lines.push('missing: ' + missing.join(', '));
-        planLog.textContent = lines.length ? lines.join('
-') : 'planned';
+        lines.length ? lines.join('\n') : 'planned';
       }
 
       tokensOut.value = mapped.join(' ');
       chipify(mapped);
       window.__plannedTokens = mapped;
-    planBtn.addEventListener('click', doPlan);
+}
+planBtn.addEventListener('click', doPlan);
+
   </script>
 
   <script>
