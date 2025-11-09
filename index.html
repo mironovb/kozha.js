@@ -356,12 +356,16 @@ function replaceAbbreviationsBrowser(text){
     // EDU NLP using compromise: pronouns, verb lemmas, key nouns
     const EDU_STOPWORDS = new Set(['a','an','the','and','or','but','if','then','than','of','to','in','on','at','for','from','with','as','by','is','are','am','be','been','was','were','do','does','did','that','this','those','these','it','my','your','our']);
 
-    function timeframeGuess(str){
-      const s = str.toLowerCase();
-      if (/will|tomorrow|next/.test(s)) return 'In the future';
-      if (/yesterday|ago|last/.test(s)) return 'In the past';
-      return 'Now';
-    }
+    <script>
+
+function timeframeGuess(str){
+  const s = (str || '').toLowerCase();
+  if (/\bwill\b|tomorrow|\bnext\b/.test(s)) return 'In the future';
+  if (/\byesterday\b|\bago\b|\blast\b/.test(s)) return 'In the past';
+  return 'Now';
+}
+</script>
+
 
     function processEducationalText(text){
       const doc = window.nlp(text);
