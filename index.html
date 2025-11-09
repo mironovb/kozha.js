@@ -84,9 +84,8 @@
     </div>
 
     <div class="grid">
-        </div>
-
-        <section>
+      <!-- LEFT: Inputs -->
+      <section>
   <div class="card">
     <h3>Text</h3>
     <div class="row">
@@ -192,6 +191,7 @@
           <details style="margin-top:8px">
             <summary class="hint">Vocabulary (from database)</summary>
             <div id="allowedOut" class="mono" style="margin-top:8px; max-height:160px; overflow:auto"></div>
+          </details>
           <h3>EDU Diagnostics</h3>
           <div class="row">
             <div class="grow">
@@ -253,9 +253,9 @@ function initCWASA() {
     }]
   });
   if (CWASA.ready && typeof CWASA.ready.then === 'function') {
-    CWASA.ready.then(() => { renderStatus.textContent = 'Ready.'; });
+    CWASA.ready.then(() => { renderStatus.textContent = 'Ready'; });
   } else {
-    setTimeout(() => { renderStatus.textContent = 'Ready.'; }, 300);
+    setTimeout(() => { renderStatus.textContent = 'Ready'; }, 300);
   }
 }
 window.addEventListener('load', () => {
@@ -266,7 +266,7 @@ window.addEventListener('load', () => {
     }
   }, 150);
 });
-</script>
+  </script>
   <script>
     // ------------------------------
     // Abbreviations loading + EDU NLP helpers
@@ -332,40 +332,34 @@ window.addEventListener('load', () => {
       }catch(e){ log('Abbrev file error: ' + e); }
     }
 
-<script>
-// (keep preceding code)
-function replaceAbbreviationsBrowser(text){
-  if (!applyAbbrev.checked || ABBREV.size === 0) return { text, count: 0 };
-  const pairs = Array.from(ABBREV.entries()).sort((a,b)=> b[0].length - a[0].length);
-  let count = 0; let out = text;
-  for (const [phrase, replRaw] of pairs){
-    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-    // Safari-safe boundaries: left via capture, right via lookahead
-    const re = new RegExp('(^|[^A-Za-z0-9_])(' + escaped + ')(?=[^A-Za-z0-9_]|$)', 'gi');
-    out = out.replace(re, (match, pre) => {
-      count++;
-      const raw = String(replRaw);
-      const repl = (/^[a-z]{2,5}$/i.test(raw) && /^[a-z]{2,5}$/.test(raw)) ? raw.toUpperCase() : raw;
-      return pre + repl;
-    });
-  }
-  return { text: out, count };
-}
-</script>
+    // (keep preceding code)
+    function replaceAbbreviationsBrowser(text){
+      if (!applyAbbrev.checked || ABBREV.size === 0) return { text, count: 0 };
+      const pairs = Array.from(ABBREV.entries()).sort((a,b)=> b[0].length - a[0].length);
+      let count = 0; let out = text;
+      for (const [phrase, replRaw] of pairs){
+        const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Safari-safe boundaries: left via capture, right via lookahead
+        const re = new RegExp('(^|[^A-Za-z0-9_])(' + escaped + ')(?=[^A-Za-z0-9_]|$)', 'gi');
+        out = out.replace(re, (match, pre) => {
+          count++;
+          const raw = String(replRaw);
+          const repl = (/^[a-z]{2,5}$/i.test(raw) && /^[a-z]{2,5}$/.test(raw)) ? raw.toUpperCase() : raw;
+          return pre + repl;
+        });
+      }
+      return { text: out, count };
+    }
 
     // EDU NLP using compromise: pronouns, verb lemmas, key nouns
     const EDU_STOPWORDS = new Set(['a','an','the','and','or','but','if','then','than','of','to','in','on','at','for','from','with','as','by','is','are','am','be','been','was','were','do','does','did','that','this','those','these','it','my','your','our']);
 
-    <script>
-
-function timeframeGuess(str){
-  const s = (str || '').toLowerCase();
-  if (/\bwill\b|tomorrow|\bnext\b/.test(s)) return 'In the future';
-  if (/\byesterday\b|\bago\b|\blast\b/.test(s)) return 'In the past';
-  return 'Now';
-}
-</script>
-
+    function timeframeGuess(str){
+      const s = (str || '').toLowerCase();
+      if (/\bwill\b|tomorrow|\bnext\b/.test(s)) return 'In the future';
+      if (/\byesterday\b|\bago\b|\blast\b/.test(s)) return 'In the past';
+      return 'Now';
+    }
 
     function processEducationalText(text){
       const doc = window.nlp(text);
@@ -448,7 +442,13 @@ function timeframeGuess(str){
     const TOPIC_TIME = new Set(['today','yesterday','tomorrow','morning','afternoon','evening','night','noon','week','month','year','time']);
 
     function normalizeText(str){
-      return (str||'').toLowerCase().replace(/[\p{P}\p{S}]/gu,' ').split(/\s+/).filter(Boolean);
+      // Safari-safe: try Unicode property escapes first, fallback to classic ASCII
+      try {
+        return (str||'').toLowerCase().replace(/[\p{P}\p{S}]/gu,' ').split(/\s+/).filter(Boolean);
+      } catch(e) {
+        // Fallback for older browsers
+        return (str||'').toLowerCase().replace(/[^\w\s]/g,' ').split(/\s+/).filter(Boolean);
+      }
     }
 
     function heuristicPlan(tokens){
@@ -553,6 +553,17 @@ function timeframeGuess(str){
 
       let mapped = null, subs={}, missing=[];
 
+      // Allow exact gloss input (e.g., abroad(a)#1)
+      const rawTokens = raw.split(/\s+/).map(s=>s.toLowerCase()).filter(Boolean);
+      if (rawTokens.length && rawTokens.every(t => currentAllowed().includes(t))){
+        normalizedOut.value = rawTokens.join(' ');
+        planLog.textContent = 'planned (exact gloss)';
+        tokensOut.value = rawTokens.join(' ');
+        chipify(rawTokens);
+        window.__plannedTokens = rawTokens;
+        return;
+      }
+
       // EDU NLP pipeline (optional)
       if (typeof eduNlpToggle !== 'undefined' && eduNlpToggle.checked){
         const eduTokens = processEducationalText(raw);
@@ -587,14 +598,15 @@ function timeframeGuess(str){
         if (heur.length) lines.push('heuristic: ' + heur.join(' '));
         if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
         if (missing.length) lines.push('missing: ' + missing.join(', '));
-        lines.length ? lines.join('\n') : 'planned';
+        planLog.textContent = lines.length ? lines.join('\n') : 'planned';
       }
 
       tokensOut.value = mapped.join(' ');
       chipify(mapped);
       window.__plannedTokens = mapped;
-}
-planBtn.addEventListener('click', doPlan);
+    }
+    
+    planBtn.addEventListener('click', doPlan);
 
   </script>
 
@@ -770,6 +782,18 @@ recordBtn.addEventListener('click', async () => {
       const prev = el.textContent ? (el.textContent + '\n') : '';
       el.textContent = prev + `[${now}] ${msg}`;
     }
+  </script>
+
+  <script>
+    // ------------------------------
+    // Global error handlers (defensive)
+    // ------------------------------
+    window.addEventListener('error', e => {
+      log('JS error: ' + (e?.error?.message || e.message));
+    });
+    window.addEventListener('unhandledrejection', e => {
+      log('Promise rejection: ' + (e?.reason?.message || e.reason));
+    });
   </script>
 </body>
 </html>
