@@ -181,41 +181,6 @@
       <!-- RIGHT: Outputs + CWASA -->
       <section>
         <div class="card">
-          <h3>Planner</h3>
-          <div class="row">
-            <div class="grow">
-              <label>Planner log</label>
-              <div id="planLog" class="log"></div>
-            </div>
-          </div>
-          <div class="row" style="margin-top:8px">
-            <div class="grow">
-              <label>Normalized</label>
-              <input type="text" id="normalizedOut" readonly />
-            </div>
-            <div class="grow">
-              <label>Tokens</label>
-              <input type="text" id="tokensOut" readonly />
-            </div>
-          </div>
-          <details style="margin-top:8px">
-            <summary class="hint">Vocabulary (from database)</summary>
-            <div id="allowedOut" class="mono" style="margin-top:8px; max-height:160px; overflow:auto"></div>
-          </details>
-          <h3>EDU Diagnostics</h3>
-          <div class="row">
-            <div class="grow">
-              <label>Timeframe guess</label>
-              <input type="text" id="timeframeOut" readonly />
-            </div>
-            <div class="grow">
-              <label>Abbreviations applied</label>
-              <input type="text" id="abbrevCountOut" readonly />
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
           <h3>Render (CWASA)</h3>
           <div class="row" style="align-items:flex-start">
             <div class="avatar-wrap">
@@ -256,7 +221,7 @@ function initCWASA() {
       width: 384,
       height: 320,
       avList: 'avs',
-      initAv: 'luna',
+      initAv: 'anna',
       ambIdle: true,
       allowFrameSteps: false,
       allowSiGMLText: false,
@@ -556,245 +521,51 @@ conceptFile?.addEventListener('change', (e)=>{
     });
   </script>
 
-  <script>
-    // ------------------------------
-    // Planning pipeline (normalize → heuristic → fuzzy map) (normalize → heuristic → fuzzy map)
-    // ------------------------------
-    const textIn = document.getElementById('textIn');
-    const planBtn = document.getElementById('planBtn');
-    const planLog = document.getElementById('planLog');
-    const normalizedOut = document.getElementById('normalizedOut');
-    const tokensOut = document.getElementById('tokensOut');
-    const queuedChips = document.getElementById('queuedChips');
-    const useOpenAI = document.getElementById('useOpenAI');
+<script>
+  // ------------------------------
+  // Plan with backend (Python spaCy via FastAPI)
+  // ------------------------------
+  const planBtn = document.getElementById("planBtn");
+  const planLog = document.getElementById("planLog");
+  const textIn = document.getElementById("textIn");
+  const normalizedOut = document.getElementById("normalizedOut");
+  const tokensOut = document.getElementById("tokensOut");
 
-    const STOPWORDS = new Set(['a','an','the','and','or','but','if','then','than','of','to','in','on','at','for','from','with','as','by','is','are','am','be','been','was','were','do','does','did','that','this','those','these','it','my','your','our']);
-    const TOPIC_TIME = new Set(['today','yesterday','tomorrow','morning','afternoon','evening','night','noon','week','month','year','time']);
-
-    function normalizeText(str){
-      // Safari-safe: try Unicode property escapes first, fallback to classic ASCII
-      try {
-        return (str||'').toLowerCase().replace(/[\p{P}\p{S}]/gu,' ').split(/\s+/).filter(Boolean);
-      } catch(e) {
-        // Fallback for older browsers
-        return (str||'').toLowerCase().replace(/[^\w\s]/g,' ').split(/\s+/).filter(Boolean);
-      }
+  async function doPlan() {
+    const text = textIn.value.trim();
+    if (!text) {
+      planLog.textContent = "Empty text.";
+      return;
     }
 
-    function heuristicPlan(tokens){
-      const kept = tokens.filter(t => !STOPWORDS.has(t));
-      const front = kept.filter(t => TOPIC_TIME.has(t));
-      const rest = kept.filter(t => !TOPIC_TIME.has(t));
-      return [...front, ...rest];
-    }
+    try {
+      const res = await fetch("http://127.0.0.1:8000/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
+      });
 
-    // Simple Levenshtein distance + similarity ratio
-    function levenshtein(a,b){
-      const m=a.length, n=b.length; if(!m) return n; if(!n) return m;
-      const dp = new Array(n+1); for(let j=0;j<=n;j++) dp[j]=j;
-      for(let i=1;i<=m;i++){
-        let prev = dp[0]; dp[0]=i;
-        for(let j=1;j<=n;j++){
-          const temp = dp[j];
-          dp[j] = Math.min(
-            dp[j] + 1,
-            dp[j-1] + 1,
-            prev + (a[i-1]===b[j-1]?0:1)
-          );
-          prev = temp;
-        }
-      }
-      return dp[n];
-    }
-    function similarity(a,b){
-      if (!a||!b) return 0;
-      const d = levenshtein(a,b);
-      return 1 - d / Math.max(a.length, b.length);
-    }
-
-   function mapToAvailable(tokens, allowedGlosses, cutoff = 0.82){
-  const mapped = [], subs = {}, missing = [];
-  if (!allowedGlosses.length) return { mapped, subs, missing: [...tokens] };
-
-  // Build local base index once per call
-  const bases = allowedGlosses.map(g => glossBase(g));
-  const baseToGlossLocal = new Map();
-  for (let i=0; i<allowedGlosses.length; i++){
-    const g = allowedGlosses[i];
-    const b = bases[i];
-    if (!baseToGlossLocal.has(b)) baseToGlossLocal.set(b, g);
-  }
-
-  for (const t of tokens){
-    // 1) exact gloss match
-    if (allowedGlosses.includes(t)) { 
-      mapped.push(t); 
-      continue; 
-    }
-
-    // 2) concept lexicon (CSV) - check first for plain words
-    const tBase = glossBase(t);
-    if (conceptToGloss.has(tBase)) {
-      const g = conceptToGloss.get(tBase);
-      mapped.push(g);
-      if (t !== g) subs[t] = g;
-      continue;
-    }
-
-    // 3) base index from loaded glosses (global)
-    if (baseToGloss.has(tBase)) {
-      const g = baseToGloss.get(tBase);
-      mapped.push(g);
-      if (t !== g) subs[t] = g;
-      continue;
-    }
-
-    // 4) local base index (fallback)
-    if (baseToGlossLocal.has(tBase)) {
-      const g = baseToGlossLocal.get(tBase);
-      mapped.push(g);
-      if (t !== tBase) subs[t] = g;
-      continue;
-    }
-
-    // 5) fuzzy match on bases
-    let bestBase = null, bestScore = 0;
-    for (const b of baseToGlossLocal.keys()){
-      const s = similarity(tBase, b);
-      if (s > bestScore) { bestScore = s; bestBase = b; }
-    }
-    if (bestBase && bestScore >= cutoff){
-      const g = baseToGlossLocal.get(bestBase);
-      mapped.push(g);
-      subs[t] = g;
-    } else {
-      missing.push(t);
-    }
-  }
-  return { mapped, subs, missing };
-}
-
-
-    function currentAllowed(){
-      return Array.from(glossToSign.keys()).sort();
-    }
-
-    function chipify(tokens){
-      queuedChips.innerHTML = '';
-      for (const t of tokens){
-        const div = document.createElement('div');
-        div.className = 'chip';
-        div.textContent = t;
-        queuedChips.appendChild(div);
-      }
-    }
-
-    // Optional OpenAI planner
-    async function planWithOpenAI(rawText, allowed){
-      const key = localStorage.getItem('openai_key');
-      if (!key) return null;
-      const system = "You rewrite user sentences into ASL-friendly word order as tokens. Use ONLY words from the allowed vocabulary provided. If a word is not present, substitute the closest semantic match from the allowed list. Return ONLY the final token sequence as a single space-separated line. No explanations.";
-      const user = `ALLOWED:\n${allowed.join(', ')}\n\nTEXT:\n${rawText}\n\nFORMAT:\nspace-separated tokens, lowercase`;
-      try{
-        const resp = await fetch('https://api.openai.com/v1/chat/completions',{
-          method:'POST',
-          headers:{ 'Authorization': `Bearer ${key}`, 'Content-Type':'application/json' },
-          body: JSON.stringify({
-            model:'gpt-4o-mini',
-            temperature:0.1,
-            messages:[{role:'system', content:system},{role:'user', content:user}],
-          })
-        });
-        if (!resp.ok) throw new Error('OpenAI HTTP ' + resp.status);
-        const data = await resp.json();
-        const content = (data.choices?.[0]?.message?.content || '').trim();
-        const toks = content.split(/\s+/).filter(w => allowed.includes(w));
-        return toks.length ? toks : null;
-      }catch(e){ log('OpenAI planner error: ' + e); return null; }
-    }
-
-    async function doPlan(){
-      const raw0 = textIn.value.trim();
-      if (!raw0) { log('Empty text.'); return; }
-      const allowed = currentAllowed();
-      if (allowed.length === 0){ log('database/ is empty — add .sigml files first.'); return; }
-
-      // Abbreviations (optional)
-      const { text: raw, count: abCount } = replaceAbbreviationsBrowser(raw0);
-      if (typeof abbrevCountOut !== 'undefined') abbrevCountOut.value = String(abCount);
-      if (typeof timeframeOut !== 'undefined') timeframeOut.value = timeframeGuess(raw);
-
-      let mapped = null, subs={}, missing=[];
-
-      // Allow exact gloss input (e.g., abroad(a)#1)
-      const rawTokens = raw.split(/\s+/).map(s=>s.toLowerCase()).filter(Boolean);
-      if (rawTokens.length && rawTokens.every(t => currentAllowed().includes(t))){
-        normalizedOut.value = rawTokens.join(' ');
-        planLog.textContent = 'planned (exact gloss)';
-        tokensOut.value = rawTokens.join(' ');
-        chipify(rawTokens);
-        window.__plannedTokens = rawTokens;
+      if (!res.ok) {
+        planLog.textContent = `Server error: ${res.status}`;
         return;
       }
 
-      // Check if entire phrase matches a concept (before tokenizing)
-      const phraseBase = glossBase(raw);
-      if (conceptToGloss.has(phraseBase)) {
-        const g = conceptToGloss.get(phraseBase);
-        mapped = [g];
-        normalizedOut.value = raw;
-        planLog.textContent = `concept-map: "${raw}" → "${g}"`;
-        tokensOut.value = g;
-        chipify(mapped);
-        window.__plannedTokens = mapped;
-        return;
+      const data = await res.json();
+      if (data.error) {
+        planLog.textContent = data.error;
+      } else {
+        planLog.textContent = `✅ spaCy plan done.`;
+        normalizedOut.value = data.raw || "";
+        tokensOut.value = data.final || "";
       }
-
-      // EDU NLP pipeline (optional)
-      if (typeof eduNlpToggle !== 'undefined' && eduNlpToggle.checked){
-        const eduTokens = processEducationalText(raw);
-        const m = mapToAvailable(eduTokens, allowed, 0.82);
-        mapped = m.mapped; subs = m.subs; missing = m.missing;
-        normalizedOut.value = eduTokens.join(' ');
-        const lines = [];
-        lines.push('edu-nlp');
-        if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
-        if (missing.length) lines.push('missing: ' + missing.join(', '));
-        planLog.textContent = lines.join('\n');
-      }
-
-      // OpenAI planner (optional)
-      if (!mapped && useOpenAI && useOpenAI.checked){
-        const toks = await planWithOpenAI(raw, allowed);
-        if (toks){
-          mapped = toks;
-          normalizedOut.value = normalizeText(raw).join(' ');
-          planLog.textContent = 'planned (OpenAI)';
-        }
-      }
-
-      // Heuristic fallback
-      if (!mapped){
-        const norm = normalizeText(raw);
-        const heur = heuristicPlan(norm);
-        const m = mapToAvailable(heur, allowed, 0.82);
-        mapped = m.mapped; subs = m.subs; missing = m.missing;
-        normalizedOut.value = norm.join(' ');
-        const lines = [];
-        if (heur.length) lines.push('heuristic: ' + heur.join(' '));
-        if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
-        if (missing.length) lines.push('missing: ' + missing.join(', '));
-        planLog.textContent = lines.length ? lines.join('\n') : 'planned';
-      }
-
-      tokensOut.value = mapped.join(' ');
-      chipify(mapped);
-      window.__plannedTokens = mapped;
+    } catch (e) {
+      planLog.textContent = "Connection error: " + e.message;
     }
-    
-    planBtn.addEventListener('click', doPlan);
+  }
 
-  </script>
+  planBtn.addEventListener("click", doPlan);
+</script>
+
 
   <script>
     // ------------------------------
