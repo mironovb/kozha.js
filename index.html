@@ -7,7 +7,8 @@
   
   <!-- CWASA core (keep these URLs per their docs) -->
   <link rel="stylesheet" href="https://vhg.cmp.uea.ac.uk/tech/jas/vhg2024/cwa/cwasa.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
-  <script defer src="https://vhg.cmp.uea.ac.uk/tech/jas/vhg2024/cwa/allcsa.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>  <script defer src="https://cdn.jsdelivr.net/npm/@xenova/transformers@3.2.1/dist/transformers.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://vhg.cmp.uea.ac.uk/tech/jas/vhg2024/cwa/allcsa.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@xenova/transformers@3.2.1/dist/transformers.min.js" crossorigin="anonymous"></script>
   <!-- Lightweight POS/NLP (compromise) for in-browser EDU pipeline -->
   <script defer src="https://unpkg.com/compromise@14.12.0/builds/compromise.min.js" crossorigin="anonymous"></script>
 
@@ -39,6 +40,11 @@
 
     .card{background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:16px;}
     .card h3{margin:0 0 12px; font-size: 16px; letter-spacing:0.02em; color:#c9d4ff}
+
+    /* Hides whole cards without removing them from DOM */
+    .hidden-card{
+      display: none !important;
+    }
 
     label{font-size:12px; text-transform:uppercase; letter-spacing:0.08em; color:#9fb0ff}
     input[type="text"], textarea, select{
@@ -86,32 +92,32 @@
     <div class="grid">
       <!-- LEFT: Inputs -->
       <section>
-  <div class="card">
-    <h3>Text</h3>
-    <div class="row">
-      <textarea id="textIn" placeholder="Type a phrase…" class="grow"></textarea>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <label class="hint">Language hint (for STT only)</label>
-      <select id="langHint">
-        <option value="auto">auto</option>
-        <option value="en" selected>en</option>
-        <option value="ru">ru</option>
-        <option value="es">es</option>
-        <option value="de">de</option>
-        <option value="fr">fr</option>
-        <option value="zh">zh</option>
-        <option value="ja">ja</option>
-      </select>
-      <span class="grow"></span>
-      <label class="row" style="gap:6px; align-items:center">
-        <input type="checkbox" id="useOpenAI" /> Use OpenAI planner
-      </label>
-      <button id="planBtn">Plan</button>
-    </div>
-  </div>
+        <div class="card">
+          <h3>Text</h3>
+          <div class="row">
+            <textarea id="textIn" placeholder="Type a phrase…" class="grow"></textarea>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <label class="hint">Language hint (for STT only)</label>
+            <select id="langHint">
+              <option value="auto">auto</option>
+              <option value="en" selected>en</option>
+              <option value="ru">ru</option>
+              <option value="es">es</option>
+              <option value="de">de</option>
+              <option value="fr">fr</option>
+              <option value="zh">zh</option>
+              <option value="ja">ja</option>
+            </select>
+            <span class="grow"></span>
+            <label class="row" style="gap:6px; align-items:center">
+              <input type="checkbox" id="useOpenAI" /> Use OpenAI planner
+            </label>
+            <button id="planBtn">Plan</button>
+          </div>
+        </div>
 
-<!-- NEW: STEM / EDU tools -->
+        <!-- STEM / EDU tools -->
         <div class="card">
           <h3>STEM / EDU tools</h3>
           <div class="row" style="margin-bottom:8px">
@@ -152,7 +158,8 @@
           </div>
         </div>
 
-        <div class="card">
+        <!-- Settings card is kept but hidden -->
+        <div class="card hidden-card">
           <h3>Settings</h3>
           <div class="row">
             <label class="grow">OpenAI API key (optional, stored locally)</label>
@@ -166,21 +173,23 @@
           </div>
           <div class="hint" style="margin-top:6px">You can load multiple files one-by-one. Loaded signs override earlier duplicates by gloss.</div>
         </div>
-        <div class="row" style="margin-top:8px">
-  <label class="grow">Concept CSV (optional)</label>
-  <input id="conceptUrlInput" type="text" placeholder="database/hamnosys_bsl.csv" />
-  <button id="loadConceptBtn">Load</button>
-</div>
-<div class="row">
-  <label class="grow">Or upload CSV/TSV</label>
-  <input id="conceptFile" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" />
-</div>
 
+        <!-- Concept CSV (still visible) -->
+        <div class="row" style="margin-top:8px">
+          <label class="grow">Concept CSV (optional)</label>
+          <input id="conceptUrlInput" type="text" placeholder="database/hamnosys_bsl.csv" />
+          <button id="loadConceptBtn">Load</button>
+        </div>
+        <div class="row">
+          <label class="grow">Or upload CSV/TSV</label>
+          <input id="conceptFile" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" />
+        </div>
       </section>
 
       <!-- RIGHT: Outputs + CWASA -->
       <section>
-        <div class="card">
+        <!-- Planner card is kept but hidden -->
+        <div class="card hidden-card">
           <h3>Planner</h3>
           <div class="row">
             <div class="grow">
@@ -238,45 +247,45 @@
   </div>
 
   <script>
+  // ------------------------------
+  // CWASA init
+  // ------------------------------
+  const renderStatus = document.getElementById('renderStatus');
 
-// ------------------------------
-// CWASA init
-// ------------------------------
-const renderStatus = document.getElementById('renderStatus');
-
-function initCWASA() {
-  if (!window.CWASA) {
-    renderStatus.textContent = 'CWASA script not loaded. Check URLs.';
-    return;
-  }
-  CWASA.init({
-    useClientConfig: false,
-    useCwaConfig: true,
-    avSettings: [{
-      width: 384,
-      height: 320,
-      avList: 'avs',
-      initAv: 'luna',
-      ambIdle: true,
-      allowFrameSteps: false,
-      allowSiGMLText: false,
-    }]
-  });
-  if (CWASA.ready && typeof CWASA.ready.then === 'function') {
-    CWASA.ready.then(() => { renderStatus.textContent = 'Ready'; });
-  } else {
-    setTimeout(() => { renderStatus.textContent = 'Ready'; }, 300);
-  }
-}
-window.addEventListener('load', () => {
-  setTimeout(() => {
-    try { initCWASA(); } catch (e) {
-      console.error(e);
-      renderStatus.textContent = 'CWASA init error — see console.';
+  function initCWASA() {
+    if (!window.CWASA) {
+      renderStatus.textContent = 'CWASA script not loaded. Check URLs.';
+      return;
     }
-  }, 150);
-});
+    CWASA.init({
+      useClientConfig: false,
+      useCwaConfig: true,
+      avSettings: [{
+        width: 384,
+        height: 320,
+        avList: 'avs',
+        initAv: 'luna',
+        ambIdle: true,
+        allowFrameSteps: false,
+        allowSiGMLText: false,
+      }]
+    });
+    if (CWASA.ready && typeof CWASA.ready.then === 'function') {
+      CWASA.ready.then(() => { renderStatus.textContent = 'Ready'; });
+    } else {
+      setTimeout(() => { renderStatus.textContent = 'Ready'; }, 300);
+    }
+  }
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      try { initCWASA(); } catch (e) {
+        console.error(e);
+        renderStatus.textContent = 'CWASA init error — see console.';
+      }
+    }, 150);
+  });
   </script>
+
   <script>
     // ------------------------------
     // Abbreviations loading + EDU NLP helpers
@@ -342,7 +351,6 @@ window.addEventListener('load', () => {
       }catch(e){ log('Abbrev file error: ' + e); }
     }
 
-    // (keep preceding code)
     function replaceAbbreviationsBrowser(text){
       if (!applyAbbrev.checked || ABBREV.size === 0) return { text, count: 0 };
       const pairs = Array.from(ABBREV.entries()).sort((a,b)=> b[0].length - a[0].length);
@@ -391,6 +399,7 @@ window.addEventListener('load', () => {
     clearAbbrevBtn.addEventListener('click', ()=> clearAbbrev());
     stemMode.addEventListener('change', ()=>{ if (stemMode.checked){ applyStemPreset(); updateAbbrevCount(ABBREV.size); log('STEM preset loaded.'); } });
   </script>
+
   <script>
     // ------------------------------
     // Database loading (SiGML) & vocab
@@ -427,7 +436,6 @@ window.addEventListener('load', () => {
       }
     }
 
-
     async function loadSigmlUrl(url, isAutoload = false){
       try{
         const res = await fetch(url, { cache: 'no-store' });
@@ -461,9 +469,12 @@ window.addEventListener('load', () => {
 
     function refreshAllowedOutput(){
       const list = Array.from(glossToSign.keys()).sort();
-      allowedOut.textContent = list.join(', ');
+      if (allowedOut) {
+        allowedOut.textContent = list.join(', ');
+      }
       rebuildBaseIndex();
     }
+
     function parseTable(text){
       // Support BOM
       let cleaned = text;
@@ -483,68 +494,66 @@ window.addEventListener('load', () => {
       return { header, rows };
     }
 
-async function loadConceptCsvUrl(url, isAutoload = false){
-  try{
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) {
-      if (isAutoload && res.status === 404) {
-        log(`Optional DB missing: ${url} (skipping)`);
-        return;
+    async function loadConceptCsvUrl(url, isAutoload = false){
+      try{
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) {
+          if (isAutoload && res.status === 404) {
+            log(`Optional DB missing: ${url} (skipping)`);
+            return;
+          }
+          throw new Error('HTTP ' + res.status);
+        }
+        const txt = await res.text();
+        const { header, rows } = parseTable(txt);
+        if (!header.includes('concept') || !header.includes('gloss'))
+          throw new Error('CSV must have "concept" and "gloss" headers');
+        let n = 0;
+        for (const r of rows){
+          const concept = String(r.concept||'').toLowerCase().trim();
+          const gloss   = String(r.gloss||'').toLowerCase().trim();
+          if (!concept || !gloss) continue;
+          conceptToGloss.set(glossBase(concept), gloss);
+          n++;
+        }
+        log(`Loaded ${n} concepts from ${url}`);
+      }catch(e){ 
+        if (isAutoload) {
+          log(`Optional DB missing: ${url} (skipping)`);
+        } else {
+          log('Concept CSV load error: ' + e);
+        }
       }
-      throw new Error('HTTP ' + res.status);
     }
-    const txt = await res.text();
-    const { header, rows } = parseTable(txt);
-    if (!header.includes('concept') || !header.includes('gloss'))
-      throw new Error('CSV must have "concept" and "gloss" headers');
-    let n = 0;
-    for (const r of rows){
-      const concept = String(r.concept||'').toLowerCase().trim();
-      const gloss   = String(r.gloss||'').toLowerCase().trim();
-      if (!concept || !gloss) continue;
-      conceptToGloss.set(glossBase(concept), gloss);
-      n++;
+
+    async function loadConceptCsvFile(file){
+      try{
+        const txt = await file.text();
+        const { header, rows } = parseTable(txt);
+        if (!header.includes('concept') || !header.includes('gloss'))
+          throw new Error('CSV must have "concept" and "gloss" headers');
+        let n = 0;
+        for (const r of rows){
+          const concept = String(r.concept||'').toLowerCase().trim();
+          const gloss   = String(r.gloss||'').toLowerCase().trim();
+          if (!concept || !gloss) continue;
+          conceptToGloss.set(glossBase(concept), gloss);
+          n++;
+        }
+        log(`Loaded ${n} concept→gloss entries from file: ${file.name}`);
+      }catch(e){ log('Concept CSV file error: ' + e); }
     }
-    log(`Loaded ${n} concepts from ${url}`);
-  }catch(e){ 
-    if (isAutoload) {
-      log(`Optional DB missing: ${url} (skipping)`);
-    } else {
-      log('Concept CSV load error: ' + e);
-    }
-  }
-}
 
-async function loadConceptCsvFile(file){
-  try{
-    const txt = await file.text();
-    const { header, rows } = parseTable(txt);
-    if (!header.includes('concept') || !header.includes('gloss'))
-      throw new Error('CSV must have "concept" and "gloss" headers');
-    let n = 0;
-    for (const r of rows){
-      const concept = String(r.concept||'').toLowerCase().trim();
-      const gloss   = String(r.gloss||'').toLowerCase().trim();
-      if (!concept || !gloss) continue;
-      conceptToGloss.set(glossBase(concept), gloss);
-      n++;
-    }
-    log(`Loaded ${n} concept→gloss entries from file: ${file.name}`);
-  }catch(e){ log('Concept CSV file error: ' + e); }
-}
+    loadConceptBtn?.addEventListener('click', ()=>{
+      const u = conceptUrlInput?.value.trim();
+      if (u) loadConceptCsvUrl(u);
+    });
+    conceptFile?.addEventListener('change', (e)=>{
+      const f = e.target.files?.[0];
+      if (f) loadConceptCsvFile(f);
+    });
 
-// Wire up buttons/inputs (IDs were added in step 1)
-loadConceptBtn?.addEventListener('click', ()=>{
-  const u = conceptUrlInput?.value.trim();
-  if (u) loadConceptCsvUrl(u);
-});
-conceptFile?.addEventListener('change', (e)=>{
-  const f = e.target.files?.[0];
-  if (f) loadConceptCsvFile(f);
-});
-
-
-    loadDbBtn.addEventListener('click', () => {
+    loadDbBtn?.addEventListener('click', () => {
       const u = dbUrlInput.value.trim();
       if (u) loadSigmlUrl(u);
     });
@@ -558,7 +567,7 @@ conceptFile?.addEventListener('change', (e)=>{
 
   <script>
     // ------------------------------
-    // Planning pipeline (normalize → heuristic → fuzzy map) (normalize → heuristic → fuzzy map)
+    // Planning pipeline (normalize → heuristic → fuzzy map)
     // ------------------------------
     const textIn = document.getElementById('textIn');
     const planBtn = document.getElementById('planBtn');
@@ -612,68 +621,67 @@ conceptFile?.addEventListener('change', (e)=>{
       return 1 - d / Math.max(a.length, b.length);
     }
 
-   function mapToAvailable(tokens, allowedGlosses, cutoff = 0.82){
-  const mapped = [], subs = {}, missing = [];
-  if (!allowedGlosses.length) return { mapped, subs, missing: [...tokens] };
+    function mapToAvailable(tokens, allowedGlosses, cutoff = 0.82){
+      const mapped = [], subs = {}, missing = [];
+      if (!allowedGlosses.length) return { mapped, subs, missing: [...tokens] };
 
-  // Build local base index once per call
-  const bases = allowedGlosses.map(g => glossBase(g));
-  const baseToGlossLocal = new Map();
-  for (let i=0; i<allowedGlosses.length; i++){
-    const g = allowedGlosses[i];
-    const b = bases[i];
-    if (!baseToGlossLocal.has(b)) baseToGlossLocal.set(b, g);
-  }
+      // Build local base index once per call
+      const bases = allowedGlosses.map(g => glossBase(g));
+      const baseToGlossLocal = new Map();
+      for (let i=0; i<allowedGlosses.length; i++){
+        const g = allowedGlosses[i];
+        const b = bases[i];
+        if (!baseToGlossLocal.has(b)) baseToGlossLocal.set(b, g);
+      }
 
-  for (const t of tokens){
-    // 1) exact gloss match
-    if (allowedGlosses.includes(t)) { 
-      mapped.push(t); 
-      continue; 
+      for (const t of tokens){
+        // 1) exact gloss match
+        if (allowedGlosses.includes(t)) { 
+          mapped.push(t); 
+          continue; 
+        }
+
+        // 2) concept lexicon (CSV) - check first for plain words
+        const tBase = glossBase(t);
+        if (conceptToGloss.has(tBase)) {
+          const g = conceptToGloss.get(tBase);
+          mapped.push(g);
+          if (t !== g) subs[t] = g;
+          continue;
+        }
+
+        // 3) base index from loaded glosses (global)
+        if (baseToGloss.has(tBase)) {
+          const g = baseToGloss.get(tBase);
+          mapped.push(g);
+          if (t !== g) subs[t] = g;
+          continue;
+        }
+
+        // 4) local base index (fallback)
+        if (baseToGlossLocal.has(tBase)) {
+          const g = baseToGlossLocal.get(tBase);
+          mapped.push(g);
+          if (t !== tBase) subs[t] = g;
+          continue;
+        }
+
+        // 5) fuzzy match on bases
+        let bestBase = null, bestScore = 0;
+        for (const b of baseToGlossLocal.keys()){
+          const s = similarity(tBase, b);
+          if (s > bestScore) { bestScore = s; bestBase = b; }
+        }
+        if (bestBase && bestScore >= cutoff){
+          const g = baseToGlossLocal.get(bestBase);
+          mapped.push(g);
+          subs[t] = g;
+        } else {
+          missing.push(t);
+        }
+      }
+      return { mapped, subs, missing };
     }
-
-    // 2) concept lexicon (CSV) - check first for plain words
-    const tBase = glossBase(t);
-    if (conceptToGloss.has(tBase)) {
-      const g = conceptToGloss.get(tBase);
-      mapped.push(g);
-      if (t !== g) subs[t] = g;
-      continue;
-    }
-
-    // 3) base index from loaded glosses (global)
-    if (baseToGloss.has(tBase)) {
-      const g = baseToGloss.get(tBase);
-      mapped.push(g);
-      if (t !== g) subs[t] = g;
-      continue;
-    }
-
-    // 4) local base index (fallback)
-    if (baseToGlossLocal.has(tBase)) {
-      const g = baseToGlossLocal.get(tBase);
-      mapped.push(g);
-      if (t !== tBase) subs[t] = g;
-      continue;
-    }
-
-    // 5) fuzzy match on bases
-    let bestBase = null, bestScore = 0;
-    for (const b of baseToGlossLocal.keys()){
-      const s = similarity(tBase, b);
-      if (s > bestScore) { bestScore = s; bestBase = b; }
-    }
-    if (bestBase && bestScore >= cutoff){
-      const g = baseToGlossLocal.get(bestBase);
-      mapped.push(g);
-      subs[t] = g;
-    } else {
-      missing.push(t);
-    }
-  }
-  return { mapped, subs, missing };
-}
-
 
     function currentAllowed(){
       return Array.from(glossToSign.keys()).sort();
@@ -721,17 +729,17 @@ conceptFile?.addEventListener('change', (e)=>{
 
       // Abbreviations (optional)
       const { text: raw, count: abCount } = replaceAbbreviationsBrowser(raw0);
-      if (typeof abbrevCountOut !== 'undefined') abbrevCountOut.value = String(abCount);
-      if (typeof timeframeOut !== 'undefined') timeframeOut.value = timeframeGuess(raw);
+      if (typeof abbrevCountOut !== 'undefined' && abbrevCountOut) abbrevCountOut.value = String(abCount);
+      if (typeof timeframeOut !== 'undefined' && timeframeOut) timeframeOut.value = timeframeGuess(raw);
 
       let mapped = null, subs={}, missing=[];
 
       // Allow exact gloss input (e.g., abroad(a)#1)
       const rawTokens = raw.split(/\s+/).map(s=>s.toLowerCase()).filter(Boolean);
       if (rawTokens.length && rawTokens.every(t => currentAllowed().includes(t))){
-        normalizedOut.value = rawTokens.join(' ');
-        planLog.textContent = 'planned (exact gloss)';
-        tokensOut.value = rawTokens.join(' ');
+        if (normalizedOut) normalizedOut.value = rawTokens.join(' ');
+        if (planLog) planLog.textContent = 'planned (exact gloss)';
+        if (tokensOut) tokensOut.value = rawTokens.join(' ');
         chipify(rawTokens);
         window.__plannedTokens = rawTokens;
         return;
@@ -742,25 +750,25 @@ conceptFile?.addEventListener('change', (e)=>{
       if (conceptToGloss.has(phraseBase)) {
         const g = conceptToGloss.get(phraseBase);
         mapped = [g];
-        normalizedOut.value = raw;
-        planLog.textContent = `concept-map: "${raw}" → "${g}"`;
-        tokensOut.value = g;
+        if (normalizedOut) normalizedOut.value = raw;
+        if (planLog) planLog.textContent = `concept-map: "${raw}" → "${g}"`;
+        if (tokensOut) tokensOut.value = g;
         chipify(mapped);
         window.__plannedTokens = mapped;
         return;
       }
 
       // EDU NLP pipeline (optional)
-      if (typeof eduNlpToggle !== 'undefined' && eduNlpToggle.checked){
+      if (typeof eduNlpToggle !== 'undefined' && eduNlpToggle && eduNlpToggle.checked){
         const eduTokens = processEducationalText(raw);
         const m = mapToAvailable(eduTokens, allowed, 0.82);
         mapped = m.mapped; subs = m.subs; missing = m.missing;
-        normalizedOut.value = eduTokens.join(' ');
+        if (normalizedOut) normalizedOut.value = eduTokens.join(' ');
         const lines = [];
         lines.push('edu-nlp');
         if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
         if (missing.length) lines.push('missing: ' + missing.join(', '));
-        planLog.textContent = lines.join('\n');
+        if (planLog) planLog.textContent = lines.join('\n');
       }
 
       // OpenAI planner (optional)
@@ -768,8 +776,8 @@ conceptFile?.addEventListener('change', (e)=>{
         const toks = await planWithOpenAI(raw, allowed);
         if (toks){
           mapped = toks;
-          normalizedOut.value = normalizeText(raw).join(' ');
-          planLog.textContent = 'planned (OpenAI)';
+          if (normalizedOut) normalizedOut.value = normalizeText(raw).join(' ');
+          if (planLog) planLog.textContent = 'planned (OpenAI)';
         }
       }
 
@@ -779,21 +787,20 @@ conceptFile?.addEventListener('change', (e)=>{
         const heur = heuristicPlan(norm);
         const m = mapToAvailable(heur, allowed, 0.82);
         mapped = m.mapped; subs = m.subs; missing = m.missing;
-        normalizedOut.value = norm.join(' ');
+        if (normalizedOut) normalizedOut.value = norm.join(' ');
         const lines = [];
         if (heur.length) lines.push('heuristic: ' + heur.join(' '));
         if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
         if (missing.length) lines.push('missing: ' + missing.join(', '));
-        planLog.textContent = lines.length ? lines.join('\n') : 'planned';
+        if (planLog) planLog.textContent = lines.length ? lines.join('\n') : 'planned';
       }
 
-      tokensOut.value = mapped.join(' ');
+      if (tokensOut) tokensOut.value = mapped.join(' ');
       chipify(mapped);
       window.__plannedTokens = mapped;
     }
     
     planBtn.addEventListener('click', doPlan);
-
   </script>
 
   <script>
@@ -860,7 +867,8 @@ conceptFile?.addEventListener('change', (e)=>{
       }
       return window.__asr;
     }
-recordBtn.addEventListener('click', async () => {
+
+    recordBtn.addEventListener('click', async () => {
       if (!mediaRecorder){
         // start
         try{
@@ -950,8 +958,8 @@ recordBtn.addEventListener('click', async () => {
     const openaiKey = document.getElementById('openaiKey');
     const saveKeyBtn = document.getElementById('saveKeyBtn');
 
-    openaiKey.value = localStorage.getItem('openai_key') || '';
-    saveKeyBtn.addEventListener('click', () => {
+    if (openaiKey) openaiKey.value = localStorage.getItem('openai_key') || '';
+    saveKeyBtn?.addEventListener('click', () => {
       const v = openaiKey.value.trim();
       if (v){ localStorage.setItem('openai_key', v); log('Saved OpenAI key locally.'); }
       else { localStorage.removeItem('openai_key'); log('Cleared OpenAI key.'); }
@@ -965,6 +973,7 @@ recordBtn.addEventListener('click', async () => {
     function log(msg){
       const el = document.getElementById('planLog');
       const now = new Date().toLocaleTimeString();
+      if (!el) return;
       const prev = el.textContent ? (el.textContent + '\n') : '';
       el.textContent = prev + `[${now}] ${msg}`;
     }
