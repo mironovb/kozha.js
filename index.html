@@ -795,28 +795,51 @@
             log('Backend error: ' + backend.error);
             throw new Error(backend.error);
           }
-    
+      
           const backendTokens = String(backend.final || '')
             .replace(/[.\n]/g, ' ')
             .split(/\s+/)
             .filter(Boolean);
-    
+      
           const m = mapToAvailable(backendTokens, allowed, 0.82);
-          mapped  = m.mapped;
-          subs    = m.subs;
-          missing = m.missing;
-    
+          const mappedFromBackend  = m.mapped;
+          const subsFromBackend    = m.subs;
+          const missingFromBackend = m.missing;
+      
+          // For diagnostics, show EXACT backend tokens
           if (normalizedOut) normalizedOut.value = backendTokens.join(' ');
+      
           if (planLog) {
             const lines = ['spacy-backend'];
-            if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
-            if (missing.length) lines.push('missing: ' + missing.join(', '));
+            if (Object.keys(subsFromBackend).length)
+              lines.push('substitutions: ' + JSON.stringify(subsFromBackend));
+            if (missingFromBackend.length)
+              lines.push('missing: ' + missingFromBackend.join(', '));
             planLog.textContent = lines.join('\n');
           }
+      
+          // Decide what to actually send to CWASA / chips:
+          // - If some tokens mapped to glosses, use those.
+          // - If NONE mapped, still respect backend and use its tokens directly.
+          const displayTokens = mappedFromBackend.length
+            ? mappedFromBackend
+            : backendTokens;
+      
+          if (!displayTokens.length) {
+            log('spaCy backend returned no usable tokens.');
+            return;
+          }
+      
+          if (tokensOut) tokensOut.value = displayTokens.join(' ');
+          chipify(displayTokens);
+          window.__plannedTokens = displayTokens;
+          return;  // IMPORTANT: do NOT fall through to EDU/heuristic for spaCy mode
         } catch (e) {
           log('Python backend error, will fall back: ' + e);
+          // Only in this case do we let the rest of doPlan() run (EDU + heuristic)
         }
-      } else if (mode === 'openai') {
+            }
+      else if (mode === 'openai') {
         try {
           const openTokens = await planWithOpenAI(raw, allowed);
           if (openTokens && openTokens.length) {
