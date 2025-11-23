@@ -110,9 +110,10 @@
               <option value="ja">ja</option>
             </select>
             <span class="grow"></span>
-            <label class="row" style="gap:6px; align-items:center">
-              <input type="checkbox" id="useOpenAI" /> Use OpenAI planner
-            </label>
+            <div class="row" style="gap:6px; align-items:center">
+              <button id="planSpaCyBtn" class="secondary">Plan (spaCy)</button>
+              <button id="planOpenAIBtn">Plan (OpenAI)</button>
+            </div>
             <button id="planBtn">Plan</button>
           </div>
         </div>
@@ -570,16 +571,33 @@
     // Planning pipeline (normalize → heuristic → fuzzy map)
     // ------------------------------
     const textIn = document.getElementById('textIn');
-    const planBtn = document.getElementById('planBtn');
+    const planSpaCyBtn = document.getElementById('planSpaCyBtn');
+    const planOpenAIBtn = document.getElementById('planOpenAIBtn');
     const planLog = document.getElementById('planLog');
     const normalizedOut = document.getElementById('normalizedOut');
     const tokensOut = document.getElementById('tokensOut');
     const queuedChips = document.getElementById('queuedChips');
-    const useOpenAI = document.getElementById('useOpenAI');
 
+
+    
+    // Call Python / spaCy backend (Render, Railway, etc.)
+    async function planWithSpaCyBackend(rawText) {
+      const resp = await fetch('https://asl-spacy-backend.onrender.com/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: rawText }),
+      });
+      if (!resp.ok) {
+        throw new Error('Backend HTTP ' + resp.status);
+      }
+      return await resp.json(); // { allowed, raw, final } from server.py
+    }
+    
     const STOPWORDS = new Set(['a','an','the','and','or','but','if','then','than','of','to','in','on','at','for','from','with','as','by','is','are','am','be','been','was','were','do','does','did','that','this','those','these','it','my','your','our']);
     const TOPIC_TIME = new Set(['today','yesterday','tomorrow','morning','afternoon','evening','night','noon','week','month','year','time']);
 
+
+    
     function normalizeText(str){
       // Safari-safe: try Unicode property escapes first, fallback to classic ASCII
       try {
@@ -721,22 +739,33 @@
       }catch(e){ log('OpenAI planner error: ' + e); return null; }
     }
 
-    async function doPlan(){
+    async function doPlan(mode) {
       const raw0 = textIn.value.trim();
-      if (!raw0) { log('Empty text.'); return; }
+      if (!raw0) {
+        log('Empty text.');
+        return;
+      }
+    
       const allowed = currentAllowed();
-      if (allowed.length === 0){ log('database/ is empty — add .sigml files first.'); return; }
-
-      // Abbreviations (optional)
+      if (allowed.length === 0) {
+        log('database/ is empty — add .sigml files first.');
+        return;
+      }
+    
+      // 1) Client-side abbreviations + timeframe
       const { text: raw, count: abCount } = replaceAbbreviationsBrowser(raw0);
-      if (typeof abbrevCountOut !== 'undefined' && abbrevCountOut) abbrevCountOut.value = String(abCount);
-      if (typeof timeframeOut !== 'undefined' && timeframeOut) timeframeOut.value = timeframeGuess(raw);
-
-      let mapped = null, subs={}, missing=[];
-
-      // Allow exact gloss input (e.g., abroad(a)#1)
-      const rawTokens = raw.split(/\s+/).map(s=>s.toLowerCase()).filter(Boolean);
-      if (rawTokens.length && rawTokens.every(t => currentAllowed().includes(t))){
+      if (typeof abbrevCountOut !== 'undefined' && abbrevCountOut) {
+        abbrevCountOut.value = String(abCount);
+      }
+      if (typeof timeframeOut !== 'undefined' && timeframeOut) {
+        timeframeOut.value = timeframeGuess(raw);
+      }
+    
+      let mapped = null, subs = {}, missing = [];
+    
+      // 2) Allow exact gloss input (e.g., abroad(a)#1 abroad(n)#1 ...)
+      const rawTokens = raw.split(/\s+/).map(s => s.toLowerCase()).filter(Boolean);
+      if (rawTokens.length && rawTokens.every(t => allowed.includes(t))) {
         if (normalizedOut) normalizedOut.value = rawTokens.join(' ');
         if (planLog) planLog.textContent = 'planned (exact gloss)';
         if (tokensOut) tokensOut.value = rawTokens.join(' ');
@@ -744,8 +773,8 @@
         window.__plannedTokens = rawTokens;
         return;
       }
-
-      // Check if entire phrase matches a concept (before tokenizing)
+    
+      // 3) Check if entire phrase matches a concept (before tokenizing)
       const phraseBase = glossBase(raw);
       if (conceptToGloss.has(phraseBase)) {
         const g = conceptToGloss.get(phraseBase);
@@ -757,50 +786,109 @@
         window.__plannedTokens = mapped;
         return;
       }
-
-      // EDU NLP pipeline (optional)
-      if (typeof eduNlpToggle !== 'undefined' && eduNlpToggle && eduNlpToggle.checked){
-        const eduTokens = processEducationalText(raw);
-        const m = mapToAvailable(eduTokens, allowed, 0.82);
-        mapped = m.mapped; subs = m.subs; missing = m.missing;
-        if (normalizedOut) normalizedOut.value = eduTokens.join(' ');
-        const lines = [];
-        lines.push('edu-nlp');
-        if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
-        if (missing.length) lines.push('missing: ' + missing.join(', '));
-        if (planLog) planLog.textContent = lines.join('\n');
-      }
-
-      // OpenAI planner (optional)
-      if (!mapped && useOpenAI && useOpenAI.checked){
-        const toks = await planWithOpenAI(raw, allowed);
-        if (toks){
-          mapped = toks;
-          if (normalizedOut) normalizedOut.value = normalizeText(raw).join(' ');
-          if (planLog) planLog.textContent = 'planned (OpenAI)';
+    
+      // 4) Backend planners: spaCy or OpenAI
+      if (mode === 'spacy') {
+        try {
+          const backend = await planWithSpaCyBackend(raw);
+          if (backend.error) {
+            log('Backend error: ' + backend.error);
+            throw new Error(backend.error);
+          }
+    
+          const backendTokens = String(backend.final || '')
+            .replace(/[.\n]/g, ' ')
+            .split(/\s+/)
+            .filter(Boolean);
+    
+          const m = mapToAvailable(backendTokens, allowed, 0.82);
+          mapped  = m.mapped;
+          subs    = m.subs;
+          missing = m.missing;
+    
+          if (normalizedOut) normalizedOut.value = backendTokens.join(' ');
+          if (planLog) {
+            const lines = ['spacy-backend'];
+            if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
+            if (missing.length) lines.push('missing: ' + missing.join(', '));
+            planLog.textContent = lines.join('\n');
+          }
+        } catch (e) {
+          log('Python backend error, will fall back: ' + e);
+        }
+      } else if (mode === 'openai') {
+        try {
+          const openTokens = await planWithOpenAI(raw, allowed);
+          if (openTokens && openTokens.length) {
+            const m = mapToAvailable(openTokens, allowed, 0.82);
+            mapped  = m.mapped;
+            subs    = m.subs;
+            missing = m.missing;
+    
+            if (normalizedOut) normalizedOut.value = openTokens.join(' ');
+            if (planLog) {
+              const lines = ['openai-backend'];
+              if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
+              if (missing.length) lines.push('missing: ' + missing.join(', '));
+              planLog.textContent = lines.join('\n');
+            }
+          }
+        } catch (e) {
+          log('OpenAI planner error, will fall back: ' + e);
         }
       }
-
-      // Heuristic fallback
-      if (!mapped){
+    
+      // 5) If backend didn’t produce anything, use EDU NLP pipeline (optional) + heuristic
+      if (!mapped || !mapped.length) {
+        // EDU NLP pipeline (if checkbox on)
+        if (typeof eduNlpToggle !== 'undefined' && eduNlpToggle.checked) {
+          const eduTokens = processEducationalText(raw);
+          const mEdu = mapToAvailable(eduTokens, allowed, 0.82);
+          mapped  = mEdu.mapped;
+          subs    = mEdu.subs;
+          missing = mEdu.missing;
+    
+          if (normalizedOut) normalizedOut.value = eduTokens.join(' ');
+          if (planLog) {
+            const lines = ['edu-nlp'];
+            if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
+            if (missing.length) lines.push('missing: ' + missing.join(', '));
+            planLog.textContent = lines.join('\n');
+          }
+        }
+      }
+    
+      // 6) Final fallback: pure heuristic on normalized tokens
+      if (!mapped || !mapped.length) {
         const norm = normalizeText(raw);
         const heur = heuristicPlan(norm);
-        const m = mapToAvailable(heur, allowed, 0.82);
-        mapped = m.mapped; subs = m.subs; missing = m.missing;
+        const mHeur = mapToAvailable(heur, allowed, 0.82);
+        mapped  = mHeur.mapped;
+        subs    = mHeur.subs;
+        missing = mHeur.missing;
+    
         if (normalizedOut) normalizedOut.value = norm.join(' ');
-        const lines = [];
-        if (heur.length) lines.push('heuristic: ' + heur.join(' '));
-        if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
-        if (missing.length) lines.push('missing: ' + missing.join(', '));
-        if (planLog) planLog.textContent = lines.length ? lines.join('\n') : 'planned';
+        if (planLog) {
+          const lines = [];
+          if (heur.length) lines.push('heuristic: ' + heur.join(' '));
+          if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
+          if (missing.length) lines.push('missing: ' + missing.join(', '));
+          planLog.textContent = lines.length ? lines.join('\n') : 'planned';
+        }
       }
-
+    
+      // 7) Push tokens to UI + CWASA
+      if (!mapped || !mapped.length) {
+        log('No tokens mapped to available signs.');
+        return;
+      }
+    
       if (tokensOut) tokensOut.value = mapped.join(' ');
       chipify(mapped);
       window.__plannedTokens = mapped;
     }
-    
-    planBtn.addEventListener('click', doPlan);
+    planSpaCyBtn.addEventListener('click', () => doPlan('spacy'));
+    planOpenAIBtn.addEventListener('click', () => doPlan('openai'));
   </script>
 
   <script>
