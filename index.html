@@ -856,7 +856,16 @@
           log('Python backend error, will fall back: ' + e);
         }
         if (planLog) {
-          const lines = ['spacy-backend', ...];
+          const lines = ['spacy-backend'];
+        
+          if (Object.keys(subsFromBackend).length) {
+            lines.push('substitutions: ' + JSON.stringify(subsFromBackend));
+          }
+        
+          if (missingFromBackend.length) {
+            lines.push('missing: ' + missingFromBackend.join(', '));
+          }
+        
           planLog.textContent = lines.join('\n');
         }
       }
