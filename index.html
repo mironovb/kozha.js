@@ -502,7 +502,8 @@
         let added = 0;
         for (const s of signs){
           const gloss = (s.getAttribute('gloss') || '').trim().toUpperCase();
-          if (!gloss || gloss.length !== 1) continue; // Only single letters
+          // Only accept single uppercase letters A-Z
+          if (!gloss || gloss.length !== 1 || gloss < 'A' || gloss > 'Z') continue;
           // Store with the outer <hns_sign> tag included
           letterToSign.set(gloss, s.outerHTML);
           added++;
@@ -747,8 +748,7 @@
           // 6) Word not found - include for fingerspelling if alphabet is available
           if (letterToSign.size > 0) {
             // Check if the word can be fingerspelled (has at least one letter A-Z)
-            const upperWord = t.toUpperCase();
-            const hasLetter = [...upperWord].some(c => c >= 'A' && c <= 'Z');
+            const hasLetter = /[A-Za-z]/.test(t);
             if (hasLetter) {
               mapped.push(t); // Include in mapped so it can be fingerspelled
               fingerspelled.push(t);
@@ -1007,13 +1007,18 @@
     const renderBtn = document.getElementById('renderBtn');
     const stopBtn = document.getElementById('stopBtn');
 
+    // Helper function to check if a character is an uppercase letter A-Z
+    function isUpperLetter(char) {
+      return char >= 'A' && char <= 'Z';
+    }
+
     // Fingerspell a word by looking up each letter in letterToSign
     function fingerspellWord(word){
       const blocks = [];
       const upperWord = (word || '').toUpperCase();
       for (const char of upperWord){
         // Only fingerspell letters A-Z
-        if (char >= 'A' && char <= 'Z'){
+        if (isUpperLetter(char)){
           const letterBlock = letterToSign.get(char);
           if (letterBlock) {
             blocks.push(letterBlock);
