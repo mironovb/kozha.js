@@ -590,8 +590,11 @@
       if (!resp.ok) {
         throw new Error('Backend HTTP ' + resp.status);
       }
-      return await resp.json(); // { allowed, raw, final } from server.py
+      const json = await resp.json();
+      console.log('BACKEND JSON:', json); // <--- ADD THIS
+      return json; // { allowed, raw, final } from server.py
     }
+
     
     const STOPWORDS = new Set(['a','an','the','and','or','but','if','then','than','of','to','in','on','at','for','from','with','as','by','is','are','am','be','been','was','were','do','does','did','that','this','those','these','it','my','your','our']);
     const TOPIC_TIME = new Set(['today','yesterday','tomorrow','morning','afternoon','evening','night','noon','week','month','year','time']);
@@ -801,44 +804,43 @@
             .split(/\s+/)
             .filter(Boolean);
       
+          console.log('BACKEND.final:', backend.final);
+          console.log('BACKEND tokens:', backendTokens);
+      
           const m = mapToAvailable(backendTokens, allowed, 0.82);
           const mappedFromBackend  = m.mapped;
           const subsFromBackend    = m.subs;
           const missingFromBackend = m.missing;
       
-          // For diagnostics, show EXACT backend tokens
-          if (normalizedOut) normalizedOut.value = backendTokens.join(' ');
+          console.log('mappedFromBackend:', mappedFromBackend);
+          console.log('subsFromBackend:', subsFromBackend);
+          console.log('missingFromBackend:', missingFromBackend);
       
-          if (planLog) {
-            const lines = ['spacy-backend'];
-            if (Object.keys(subsFromBackend).length)
-              lines.push('substitutions: ' + JSON.stringify(subsFromBackend));
-            if (missingFromBackend.length)
-              lines.push('missing: ' + missingFromBackend.join(', '));
-            planLog.textContent = lines.join('\n');
-          }
-      
-          // Decide what to actually send to CWASA / chips:
-          // - If some tokens mapped to glosses, use those.
-          // - If NONE mapped, still respect backend and use its tokens directly.
+          // ...
           const displayTokens = mappedFromBackend.length
             ? mappedFromBackend
             : backendTokens;
       
-          if (!displayTokens.length) {
-            log('spaCy backend returned no usable tokens.');
-            return;
-          }
+          console.log('displayTokens actually used:', displayTokens);
+      
+          // rest as you have:
+          if (normalizedOut) normalizedOut.value = backendTokens.join(' ');
+          if (planLog) { /* ... */ }
+          if (!displayTokens.length) { /* ... */ }
       
           if (tokensOut) tokensOut.value = displayTokens.join(' ');
           chipify(displayTokens);
           window.__plannedTokens = displayTokens;
-          return;  // IMPORTANT: do NOT fall through to EDU/heuristic for spaCy mode
+          return;
         } catch (e) {
           log('Python backend error, will fall back: ' + e);
-          // Only in this case do we let the rest of doPlan() run (EDU + heuristic)
         }
-            }
+        if (planLog) {
+          const lines = ['spacy-backend', ...];
+          planLog.textContent = lines.join('\n');
+        }
+      }
+
       else if (mode === 'openai') {
         try {
           const openTokens = await planWithOpenAI(raw, allowed);
