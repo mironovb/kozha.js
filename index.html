@@ -396,7 +396,13 @@
 
     // UI wiring
     loadAbbrevUrlBtn.addEventListener('click', ()=>{ const u = abbrevUrl.value.trim(); if (u) loadAbbrevFromUrl(u); });
-    abbrevFile?.addEventListener('change', (e)=>{ const f = e.target.files?.[0]; if (f) loadAbbrevFromFile(f); });
+    if (abbrevFile) {
+      abbrevFile.addEventListener('change', (e) => {
+        const files = e.target && e.target.files;
+        const f = files && files[0];
+        if (f) loadAbbrevFromFile(f);
+      });
+    }
     clearAbbrevBtn.addEventListener('click', ()=> clearAbbrev());
     stemMode.addEventListener('change', ()=>{ if (stemMode.checked){ applyStemPreset(); updateAbbrevCount(ABBREV.size); log('STEM preset loaded.'); } });
   </script>
@@ -549,10 +555,14 @@
       const u = conceptUrlInput?.value.trim();
       if (u) loadConceptCsvUrl(u);
     });
-    conceptFile?.addEventListener('change', (e)=>{
-      const f = e.target.files?.[0];
-      if (f) loadConceptCsvFile(f);
-    });
+    if (conceptFile) {
+      conceptFile.addEventListener('change', (e) => {
+        const files = e.target && e.target.files;
+        const f = files && files[0];
+        if (f) loadConceptCsvFile(f);
+      });
+    }
+
 
     loadDbBtn?.addEventListener('click', () => {
       const u = dbUrlInput.value.trim();
@@ -736,7 +746,17 @@
         });
         if (!resp.ok) throw new Error('OpenAI HTTP ' + resp.status);
         const data = await resp.json();
-        const content = (data.choices?.[0]?.message?.content || '').trim();
+        let content = '';
+        if (
+          data &&
+          Array.isArray(data.choices) &&
+          data.choices.length > 0 &&
+          data.choices[0] &&
+          data.choices[0].message &&
+          typeof data.choices[0].message.content === 'string'
+        ) {
+          content = data.choices[0].message.content.trim();
+        }
         const toks = content.split(/\s+/).filter(w => allowed.includes(w));
         return toks.length ? toks : null;
       }catch(e){ log('OpenAI planner error: ' + e); return null; }
@@ -1038,7 +1058,11 @@
     }
 
     videoToSignBtn.addEventListener('click', async () => {
-      const file = videoFile.files?.[0];
+      let file = null;
+      if (videoFile && videoFile.files && videoFile.files.length > 0) {
+        file = videoFile.files[0];
+      }
+
       if (!file){ videoStatus.textContent = 'Choose a video first.'; return; }
       try{
         videoStatus.textContent = 'Preparing ffmpeg…';
