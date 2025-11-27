@@ -419,6 +419,7 @@
     const conceptFile     = document.getElementById('conceptFile');
 
     const glossToSign = new Map(); // gloss -> <hns_sign>...</hns_sign>
+    const letterToSign = new Map(); // letter -> <hns_sign>...</hns_sign> for fingerspelling
 
     // Canonical indices
     const baseToGloss = new Map();   // "abroad" -> "abroad(a)#1" (preferred)
@@ -480,6 +481,41 @@
         allowedOut.textContent = list.join(', ');
       }
       rebuildBaseIndex();
+    }
+
+    // Load alphabet SIGML for fingerspelling support
+    async function loadAlphabetSigmlUrl(url, isAutoload = false){
+      try{
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) {
+          if (isAutoload && res.status === 404) {
+            log(`Optional alphabet DB missing: ${url} (skipping)`);
+            return;
+          }
+          throw new Error('HTTP ' + res.status);
+        }
+        const xmlText = await res.text();
+        // The alphabet file has multiple <sigml> blocks with <!-- Letter: X --> comments
+        // We need to parse each <hns_sign> and get the gloss (which is the letter)
+        const doc = new DOMParser().parseFromString('<root>' + xmlText + '</root>', 'application/xml');
+        const signs = Array.from(doc.querySelectorAll('hns_sign'));
+        let added = 0;
+        for (const s of signs){
+          const gloss = (s.getAttribute('gloss') || '').trim().toUpperCase();
+          // Only accept single uppercase letters A-Z
+          if (!gloss || gloss.length !== 1 || gloss < 'A' || gloss > 'Z') continue;
+          // Store with the outer <hns_sign> tag included
+          letterToSign.set(gloss, s.outerHTML);
+          added++;
+        }
+        log(`Loaded ${added} alphabet letters for fingerspelling from ${url}`);
+      }catch(e){
+        if (isAutoload) {
+          log(`Optional alphabet DB missing: ${url} (skipping)`);
+        } else {
+          log(`Failed to load alphabet ${url}: ${e}.`);
+        }
+      }
     }
 
     function parseTable(text){
@@ -573,6 +609,7 @@
     window.addEventListener('load', async () => {
       await loadSigmlUrl('database/hamnosys_bsl_version1.sigml', true);
       await loadConceptCsvUrl('database/hamnosys_bsl.csv', true);
+      await loadAlphabetSigmlUrl('database/bsl_alphabet_sigml.sigml', true);
     });
   </script>
 
@@ -653,8 +690,8 @@
     }
 
     function mapToAvailable(tokens, allowedGlosses, cutoff = 0.82){
-      const mapped = [], subs = {}, missing = [];
-      if (!allowedGlosses.length) return { mapped, subs, missing: [...tokens] };
+      const mapped = [], subs = {}, missing = [], fingerspelled = [];
+      if (!allowedGlosses.length) return { mapped, subs, missing: [...tokens], fingerspelled };
 
       // Build local base index once per call
       const bases = allowedGlosses.map(g => glossBase(g));
@@ -708,10 +745,22 @@
           mapped.push(g);
           subs[t] = g;
         } else {
-          missing.push(t);
+          // 6) Word not found - include for fingerspelling if alphabet is available
+          if (letterToSign.size > 0) {
+            // Check if the word can be fingerspelled (has at least one letter A-Z)
+            const hasLetter = /[A-Za-z]/.test(t);
+            if (hasLetter) {
+              mapped.push(t); // Include in mapped so it can be fingerspelled
+              fingerspelled.push(t);
+            } else {
+              missing.push(t);
+            }
+          } else {
+            missing.push(t);
+          }
         }
       }
-      return { mapped, subs, missing };
+      return { mapped, subs, missing, fingerspelled };
     }
 
     function currentAllowed(){
@@ -831,22 +880,33 @@
           const mappedFromBackend  = m.mapped;
           const subsFromBackend    = m.subs;
           const missingFromBackend = m.missing;
+          const fingerspelledFromBackend = m.fingerspelled || [];
       
           console.log('mappedFromBackend:', mappedFromBackend);
           console.log('subsFromBackend:', subsFromBackend);
           console.log('missingFromBackend:', missingFromBackend);
+          console.log('fingerspelledFromBackend:', fingerspelledFromBackend);
       
-          // ...
           const displayTokens = mappedFromBackend.length
             ? mappedFromBackend
             : backendTokens;
       
           console.log('displayTokens actually used:', displayTokens);
       
-          // rest as you have:
           if (normalizedOut) normalizedOut.value = backendTokens.join(' ');
-          if (planLog) { /* ... */ }
-          if (!displayTokens.length) { /* ... */ }
+          if (planLog) {
+            const lines = ['spacy-backend'];
+            if (Object.keys(subsFromBackend).length) {
+              lines.push('substitutions: ' + JSON.stringify(subsFromBackend));
+            }
+            if (fingerspelledFromBackend.length) {
+              lines.push('fingerspelled: ' + fingerspelledFromBackend.join(', '));
+            }
+            if (missingFromBackend.length) {
+              lines.push('missing: ' + missingFromBackend.join(', '));
+            }
+            planLog.textContent = lines.join('\n');
+          }
       
           if (tokensOut) tokensOut.value = displayTokens.join(' ');
           chipify(displayTokens);
@@ -854,19 +914,6 @@
           return;
         } catch (e) {
           log('Python backend error, will fall back: ' + e);
-        }
-        if (planLog) {
-          const lines = ['spacy-backend'];
-        
-          if (Object.keys(subsFromBackend).length) {
-            lines.push('substitutions: ' + JSON.stringify(subsFromBackend));
-          }
-        
-          if (missingFromBackend.length) {
-            lines.push('missing: ' + missingFromBackend.join(', '));
-          }
-        
-          planLog.textContent = lines.join('\n');
         }
       }
 
@@ -878,11 +925,13 @@
             mapped  = m.mapped;
             subs    = m.subs;
             missing = m.missing;
+            const fingerspelled = m.fingerspelled || [];
     
             if (normalizedOut) normalizedOut.value = openTokens.join(' ');
             if (planLog) {
               const lines = ['openai-backend'];
               if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
+              if (fingerspelled.length) lines.push('fingerspelled: ' + fingerspelled.join(', '));
               if (missing.length) lines.push('missing: ' + missing.join(', '));
               planLog.textContent = lines.join('\n');
             }
@@ -901,11 +950,13 @@
           mapped  = mEdu.mapped;
           subs    = mEdu.subs;
           missing = mEdu.missing;
+          const fingerspelled = mEdu.fingerspelled || [];
     
           if (normalizedOut) normalizedOut.value = eduTokens.join(' ');
           if (planLog) {
             const lines = ['edu-nlp'];
             if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
+            if (fingerspelled.length) lines.push('fingerspelled: ' + fingerspelled.join(', '));
             if (missing.length) lines.push('missing: ' + missing.join(', '));
             planLog.textContent = lines.join('\n');
           }
@@ -920,12 +971,14 @@
         mapped  = mHeur.mapped;
         subs    = mHeur.subs;
         missing = mHeur.missing;
+        const fingerspelled = mHeur.fingerspelled || [];
     
         if (normalizedOut) normalizedOut.value = norm.join(' ');
         if (planLog) {
           const lines = [];
           if (heur.length) lines.push('heuristic: ' + heur.join(' '));
           if (Object.keys(subs).length) lines.push('substitutions: ' + JSON.stringify(subs));
+          if (fingerspelled.length) lines.push('fingerspelled: ' + fingerspelled.join(', '));
           if (missing.length) lines.push('missing: ' + missing.join(', '));
           planLog.textContent = lines.length ? lines.join('\n') : 'planned';
         }
@@ -941,6 +994,8 @@
       chipify(mapped);
       window.__plannedTokens = mapped;
     }
+    const planBtn = document.getElementById('planBtn');
+    planBtn.addEventListener('click', () => doPlan('heuristic'));
     planSpaCyBtn.addEventListener('click', () => doPlan('spacy'));
     planOpenAIBtn.addEventListener('click', () => doPlan('openai'));
   </script>
@@ -952,11 +1007,42 @@
     const renderBtn = document.getElementById('renderBtn');
     const stopBtn = document.getElementById('stopBtn');
 
+    // Helper function to check if a character is an uppercase letter A-Z
+    function isUpperLetter(char) {
+      return char >= 'A' && char <= 'Z';
+    }
+
+    // Fingerspell a word by looking up each letter in letterToSign
+    function fingerspellWord(word){
+      const blocks = [];
+      const upperWord = (word || '').toUpperCase();
+      for (const char of upperWord){
+        // Only fingerspell letters A-Z
+        if (isUpperLetter(char)){
+          const letterBlock = letterToSign.get(char);
+          if (letterBlock) {
+            blocks.push(letterBlock);
+          }
+        }
+        // Numbers and other characters are skipped (could be extended later)
+      }
+      return blocks;
+    }
+
     function buildSigml(tokens){
       const blocks = [];
       for (const t of tokens){
         const b = glossToSign.get(t);
-        if (b) blocks.push(b);
+        if (b) {
+          blocks.push(b);
+        } else if (letterToSign.size > 0) {
+          // Word not found in dictionary - try fingerspelling
+          const letterBlocks = fingerspellWord(t);
+          if (letterBlocks.length > 0) {
+            blocks.push(...letterBlocks);
+            log(`Fingerspelling: "${t}"`);
+          }
+        }
       }
       if (!blocks.length) return null;
       return `<?xml version="1.0" encoding="utf-8"?>\n<sigml>\n${blocks.join('\n')}\n</sigml>`;
