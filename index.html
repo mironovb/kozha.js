@@ -101,13 +101,13 @@
             <label class="hint">Language hint (for STT only)</label>
             <select id="langHint">
               <option value="auto">auto</option>
-              <option value="en" selected>en</option>
-              <option value="ru">ru</option>
-              <option value="es">es</option>
-              <option value="de">de</option>
-              <option value="fr">fr</option>
-              <option value="zh">zh</option>
-              <option value="ja">ja</option>
+              <option value="English - British" selected>en</option>
+              <option value="Russian">ru</option>
+              <option value="Español">es</option>
+              <option value="Deutsch">de</option>
+              <option value="Français">fr</option>
+              <option value="">Chinese</option>
+              <option value="Japanese">ja</option>
             </select>
             <span class="grow"></span>
             <div class="row" style="gap:6px; align-items:center">
@@ -819,6 +819,7 @@
             throw new Error(backend.error);
           }
       
+          // 1) Take backend tokens as-is from Python
           const backendTokens = String(backend.final || '')
             .replace(/[.\n]/g, ' ')
             .split(/\s+/)
@@ -827,48 +828,98 @@
           console.log('BACKEND.final:', backend.final);
           console.log('BACKEND tokens:', backendTokens);
       
+          // 2) Pure letters case (like i l y) → direct fingerspell mode
+          const allLetters = backendTokens.length > 0 &&
+            backendTokens.every(function (t) { return /^[a-z]$/i.test(t); });
+      
+          if (allLetters) {
+            if (normalizedOut) normalizedOut.value = backendTokens.join(' ');
+            if (planLog) planLog.textContent = 'spacy-backend (fingerspelling)';
+      
+            if (tokensOut) tokensOut.value = backendTokens.join(' ');
+            chipify(backendTokens);
+      
+            window.__plannedTokens = backendTokens;
+            window.__plannedMode   = 'fingerspell';
+            return; // do NOT fall through to mapping / heuristic
+          }
+      
+          // 3) Otherwise: map to available glosses (for known signs)
           const m = mapToAvailable(backendTokens, allowed, 0.82);
           const mappedFromBackend  = m.mapped;
-          const subsFromBackend    = m.subs;
+          const subsFromBackend    = m.subs;     // { originalToken: gloss }
           const missingFromBackend = m.missing;
       
           console.log('mappedFromBackend:', mappedFromBackend);
           console.log('subsFromBackend:', subsFromBackend);
           console.log('missingFromBackend:', missingFromBackend);
       
-          // ...
-          const displayTokens = mappedFromBackend.length
-            ? mappedFromBackend
-            : backendTokens;
+          // 4) Log planner info
+          if (planLog) {
+            const lines = ['spacy-backend'];
+            if (Object.keys(subsFromBackend).length) {
+              lines.push('substitutions: ' + JSON.stringify(subsFromBackend));
+            }
+            if (missingFromBackend.length) {
+              lines.push('missing: ' + missingFromBackend.join(', '));
+            }
+            planLog.textContent = lines.join('\n');
+          }
+      
+          // 5) MIXED CASE LOGIC: use signs where possible, fingerspell unknowns
+          const displayTokens = [];
+          for (var i = 0; i < backendTokens.length; i++) {
+            var t = backendTokens[i];
+            var lower = t.toLowerCase();
+      
+            if (subsFromBackend[t]) {
+              // Known substitution from concept → gloss
+              displayTokens.push(subsFromBackend[t]);
+            } else if (allowed.indexOf(t) !== -1) {
+              // Token itself is already a known gloss in the DB
+              displayTokens.push(t);
+            } else if (/^[a-z]+$/i.test(t) && allowed.indexOf(t) === -1) {
+              // Unknown alphabetic word → fingerspell it
+              if (t.length === 1) {
+                // single letter (good for abbreviations inside mixed sentences)
+                displayTokens.push(lower);
+              } else {
+                // multi-letter word → split into letters
+                var letters = lower.split('');
+                for (var j = 0; j < letters.length; j++) {
+                  displayTokens.push(letters[j]);
+                }
+              }
+            } else {
+              // Non-alphabetic or whatever else you want to keep as-is
+              displayTokens.push(t);
+            }
+          }
       
           console.log('displayTokens actually used:', displayTokens);
       
-          // rest as you have:
-          if (normalizedOut) normalizedOut.value = backendTokens.join(' ');
-          if (planLog) { /* ... */ }
-          if (!displayTokens.length) { /* ... */ }
+          if (!displayTokens.length) {
+            log('spaCy backend returned no usable tokens.');
+            return;
+          }
       
+          if (normalizedOut) normalizedOut.value = backendTokens.join(' ');
           if (tokensOut) tokensOut.value = displayTokens.join(' ');
           chipify(displayTokens);
+      
           window.__plannedTokens = displayTokens;
-          return;
+          var allLettersDisplay = displayTokens.every(function (tok) {
+            return /^[a-z]$/i.test(tok);
+          });
+          window.__plannedMode = allLettersDisplay ? 'fingerspell' : 'mixed';
+      
+          return; // IMPORTANT: do not fall through to EDU/heuristic
         } catch (e) {
           log('Python backend error, will fall back: ' + e);
-        }
-        if (planLog) {
-          const lines = ['spacy-backend'];
-        
-          if (Object.keys(subsFromBackend).length) {
-            lines.push('substitutions: ' + JSON.stringify(subsFromBackend));
-          }
-        
-          if (missingFromBackend.length) {
-            lines.push('missing: ' + missingFromBackend.join(', '));
-          }
-        
-          planLog.textContent = lines.join('\n');
+          // In this case, the EDU / heuristic pipeline below will run.
         }
       }
+
 
       else if (mode === 'openai') {
         try {
