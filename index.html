@@ -629,18 +629,33 @@
     
     // Call Python / spaCy backend (Render, Railway, etc.)
     async function planWithSpaCyBackend(rawText) {
-      const resp = await fetch('https://asl-spacy-backend.onrender.com/plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: rawText }),
-      });
-      if (!resp.ok) {
-        throw new Error('Backend HTTP ' + resp.status);
+      try {
+        const resp = await fetch('https://asl-spacy-backend.onrender.com/plan', {
+          method: 'POST',
+          mode: 'cors',
+          credentials: 'omit',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: rawText }),
+        });
+    
+        console.log("Backend response:", resp.status, resp.ok);
+    
+        if (!resp.ok) {
+          // Try to read body for extra info (optional)
+          let detail = "";
+          try { detail = await resp.text(); } catch (_) {}
+          throw new Error(`Backend HTTP ${resp.status} ${detail}`);
+        }
+    
+        const json = await resp.json();
+        console.log('BACKEND JSON:', json);
+        return json;
+      } catch (e) {
+        console.error("spaCy backend fetch failed:", e);
+        throw e;
       }
-      const json = await resp.json();
-      console.log('BACKEND JSON:', json); // <--- ADD THIS
-      return json; // { allowed, raw, final } from server.py
     }
+
 
     
     const STOPWORDS = new Set(['a','an','the','and','or','but','if','then','than','of','to','in','on','at','for','from','with','as','by','is','are','am','be','been','was','were','do','does','did','that','this','those','these','it','my','your','our']);
